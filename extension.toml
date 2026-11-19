@@ -4,7 +4,7 @@ description = "TypeScript v7's native compiler and language server."
 version = "1.1.0"
 schema_version = 1
 authors = ["Zed Industries <hello@zed.dev>"]
-repository = "https://github.com/zed-extensions/tsgo"
+repository = "https://github.com/mhmdazkanfl/tsgo"
 
 
 [language_servers.typescript-ls]

@@ -8,4 +8,5 @@ path = "src/tsgo.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+semver = "1"
 zed_extension_api = "0.7.0"
