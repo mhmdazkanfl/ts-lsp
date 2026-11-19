@@ -45,7 +45,7 @@ Use `typescript-ls` for the languages you want it to handle. This example disabl
 
 ### Full `lsp.typescript-ls` configuration
 
-This reference covers the fork's launch settings and TypeScript **7.0.2** server options. All keys are optional. Copy the settings you want to override. Some values below illustrate a choice and differ from the server defaults. Use your Zed user `settings.json` or a project's `.zed/settings.json`.
+This reference covers settings that affect server startup, TypeScript **7.0.2** LSP behavior, or Zed's integration with the server. All keys are optional. Copy the settings you want to override. Some values below illustrate a choice and differ from the server defaults. Use your Zed user `settings.json` or a project's `.zed/settings.json`.
 
 ```jsonc
 {
@@ -57,28 +57,22 @@ This reference covers the fork's launch settings and TypeScript **7.0.2** server
         // Include both arguments when setting binary.path to native tsc.
         "arguments": ["--lsp", "--stdio"],
         // Additional environment variables. Values must be strings.
-        "env": {}
+        "env": { "GOMAXPROCS": "4" }
       },
       "initialization_options": {
         "codeLensShowLocationsCommandName": "editor.action.showReferences",
         "disablePushDiagnostics": false,
         "enableTelemetry": false,
         // 0 off, 1 trace, 2 debug, 3 info, 4 warning, 5 error.
-        "logVerbosity": 3,
-        // Fallback for clients without workspace/configuration. See notes below.
-        "userPreferences": {}
+        "logVerbosity": 3
       },
       "settings": {
         // Optional exact release, npm tag, or npm version range.
         // "package_version": "7.0.2",
         "prefer_project_binary": true,
-        "editor": {},
-        "javascript": {},
-        "typescript": {},
         "js/ts": {
           // A filename, such as "tsconfig.editor.json". Empty uses normal discovery.
           "customConfigFileName": "",
-          "autoClosingTags": { "enabled": true },
           "suggest": {
             "autoImports": true,
             "includeCompletionsForImportStatements": true,
@@ -100,8 +94,8 @@ This reference covers the fork's launch settings and TypeScript **7.0.2** server
             "organizeImports": {
               "sort": "auto", // auto, ordinal, ordinalIgnoreCase, natural, naturalIgnoreCase
               "caseSensitivity": "auto", // auto, caseSensitive, caseInsensitive
-              "unicodeCollation": "ordinal", // ordinal, unicode
-              "locale": "en", // Parsed for compatibility. Sorting is locale-independent in 7.0.2.
+              "unicodeCollation": "unicode", // ordinal, unicode
+              // The next three options apply to Unicode sorting with sort and caseSensitivity set to auto.
               "numericCollation": false,
               "accentCollation": true,
               "caseFirst": "default", // default, lower, upper
@@ -116,7 +110,6 @@ This reference covers the fork's launch settings and TypeScript **7.0.2** server
             "newLineCharacter": "\n",
             "convertTabsToSpaces": true,
             "indentStyle": "smart", // none, block, smart
-            "trimTrailingWhitespace": true,
             "insertSpaceAfterCommaDelimiter": true,
             "insertSpaceAfterSemicolonInForStatements": true,
             "insertSpaceBeforeAndAfterBinaryOperators": true,
@@ -158,21 +151,11 @@ This reference covers the fork's launch settings and TypeScript **7.0.2** server
           "workspaceSymbols": { "excludeLibrarySymbols": true },
           "validate": { "enabled": true },
           "reportStyleChecksAsWarnings": true,
-          // Legacy ATA preference. The explicit tsserver setting below takes precedence.
-          "disableAutomaticTypeAcquisition": false,
           "tsserver": { "automaticTypeAcquisition": { "enabled": true } },
           "unstable": {
             "maximumHoverLength": 500,
             "allowRenameOfImportPath": true,
-            "preferGoToSourceDefinition": false,
-            // These fields are accepted by the 7.0.2 preference parser.
-            // They have no independent effect in its LSP implementation.
-            "lazyConfiguredProjectsFromExternalProject": false,
-            "allowTextChangesInNewFiles": false,
-            "provideRefactorNotApplicableReason": true,
-            "disableSuggestions": false,
-            "disableLineTextInReferences": true,
-            "displayPartsForJSDoc": true
+            "preferGoToSourceDefinition": false
           }
         }
       }
@@ -192,13 +175,10 @@ This reference covers the fork's launch settings and TypeScript **7.0.2** server
 | `settings.package_version` | With no pin, the fork uses compatible project TypeScript or checks npm for a managed release. An exact pin must match the project version for the project binary to qualify. npm resolves tags and ranges through the managed install. A failed explicit version request reports an error. An unpinned launch can reuse a valid managed install when updating fails. |
 | `initialization_options.codeLensShowLocationsCommandName` | Client command used by resolved references and implementations CodeLens. Keep the extension's default `editor.action.showReferences` for Zed. |
 | `initialization_options.disablePushDiagnostics` | Disables server-pushed diagnostics when `true`. Pull diagnostics are controlled by Zed and `settings["js/ts"].validate.enabled`. |
-| `initialization_options.enableTelemetry` | Enables the server's LSP telemetry events when `true`. Default `false`. |
+| `initialization_options.enableTelemetry` | Enables the server's LSP telemetry events when `true`. Default `false`. Zed has no UI for these events. |
 | `initialization_options.logVerbosity` | Initial server logging level. Default `3` (info). |
-| `initialization_options.userPreferences` | TypeScript reads this fallback object when the LSP client lacks workspace configuration support. With Zed, put preferences under `settings`. |
 
 Restart the language server after changing its launch or initialization settings. Use `lsp.typescript-ls` for new settings. The fork also reads `lsp.tsgo` as a fallback for existing configurations.
-
-Zed's per-server schema also accepts `binary.ignore_system_version`, `fetch.pre_release`, and `enable_lsp_tasks`. These fields have no effect on this fork's binary selection or on the TypeScript 7.0.2 server. Use `prefer_project_binary` and `package_version` for binary and release selection.
 
 #### Workspace preference precedence
 
@@ -207,13 +187,12 @@ TypeScript 7.0.2 builds a shared preference set by applying `editor`, `javascrip
 - `editor` accepts the flat preference keys, such as `tabSize` and `convertTabsToSpaces`. The other three sections accept nested keys, flat keys, and an `unstable` object containing flat keys. Within each of those sections, `unstable` overrides top-level flat keys, and recognized nested settings take precedence over both.
 - A custom `customConfigFileName` is a filename only, such as `tsconfig.editor.json`. The server falls back to `tsconfig.json` or `jsconfig.json` when it can't find the custom file. Set compiler options in the project config.
 - `unstable.preferGoToSourceDefinition: true` makes the existing Go to Definition action prefer source files where the server can find them.
-- Zed sends `tab_size`, `hard_tabs`, and `remove_trailing_whitespace_on_save` with formatting requests. TypeScript uses those request values for tab width, indent width, tabs versus spaces, and trailing-whitespace handling. To use TypeScript's formatter, set `"formatter": "language_server"` for the relevant languages.
-- `autoClosingTags.enabled` controls the server's auto-insert handler. Any feature that needs an editor action still depends on Zed's client support.
+- Zed sends `tab_size`, `hard_tabs`, and `remove_trailing_whitespace_on_save` with formatting requests. TypeScript uses those request values for tab width, indent width, tabs versus spaces, and trailing-whitespace handling. The server uses its configured `tabSize`, `indentSize`, and `convertTabsToSpaces` when generating edits for features such as quick fixes. To use TypeScript's formatter, set `"formatter": "language_server"` for the relevant languages.
 
 <details>
 <summary>Flat preference aliases and compatibility keys</summary>
 
-Use the right-hand key as a literal name inside a section's `unstable` object or directly inside `editor`. Formatting fields use their leaf names, such as `semicolons` and `indentSize`, except `format.enabled`, whose flat key is `formatEnabled`.
+Use the right-hand key in `js/ts.unstable` to override the fork’s defaults. A nested key in the same section takes precedence. Formatting fields use their leaf names, such as `semicolons` and `indentSize`, except `format.enabled`, whose flat key is `formatEnabled`.
 
 | Nested key | Flat key |
 | --- | --- |
@@ -229,7 +208,6 @@ Use the right-hand key as a literal name inside a section's `unstable` object or
 | `preferences.organizeImports.sort` | `organizeImportsSort` |
 | `preferences.organizeImports.caseSensitivity` | `organizeImportsIgnoreCase` (`true` for case-insensitive, `false` for case-sensitive) |
 | `preferences.organizeImports.unicodeCollation` | `organizeImportsCollation` |
-| `preferences.organizeImports.locale` | `organizeImportsLocale` |
 | `preferences.organizeImports.numericCollation` | `organizeImportsNumericCollation` |
 | `preferences.organizeImports.accentCollation` | `organizeImportsAccentCollation` |
 | `preferences.organizeImports.caseFirst` | `organizeImportsCaseFirst` |
@@ -241,7 +219,6 @@ Use the right-hand key as a literal name inside a section's `unstable` object or
 | `suggest.objectLiteralMethodSnippets.enabled` | `includeCompletionsWithObjectLiteralMethodSnippets` |
 | `suggest.jsdoc.enabled` | `completeJSDocs` |
 | `suggest.jsdoc.generateReturns` | `generateReturnInDocTemplate` |
-| `autoClosingTags.enabled` | `autoClosingTags` (boolean) |
 | `inlayHints.parameterNames.enabled` | `includeInlayParameterNameHints` |
 | `inlayHints.parameterNames.suppressWhenArgumentMatchesName` | `includeInlayParameterNameHintsWhenArgumentMatchesName` (inverted boolean) |
 | `inlayHints.parameterTypes.enabled` | `includeInlayFunctionParameterTypeHints` |
@@ -259,9 +236,9 @@ Use the right-hand key as a literal name inside a section's `unstable` object or
 | `validate.enabled` | `validateEnabled` |
 | `workspaceSymbols.excludeLibrarySymbols` | `excludeLibrarySymbolsInNavTo` |
 | `tsserver.automaticTypeAcquisition.enabled` | `automaticTypeAcquisitionEnabled` |
-| `disableAutomaticTypeAcquisition`, `reportStyleChecksAsWarnings`, `customConfigFileName` | Same name |
+| `reportStyleChecksAsWarnings`, `customConfigFileName` | Same name |
 
-TypeScript also accepts `autoClosingTags` as a boolean, `suggest.completeJSDocs`, `format.enable`, and `validate.enable` as compatibility keys when their canonical nested counterparts are absent. `caseSensitivity` also accepts booleans with the same meaning as `organizeImportsIgnoreCase`. `indentStyle` accepts `0`, `1`, and `2` for `none`, `block`, and `smart`.
+TypeScript also accepts `suggest.completeJSDocs`, `format.enable`, and `validate.enable` as compatibility keys when their canonical nested counterparts are absent. `caseSensitivity` also accepts booleans with the same meaning as `organizeImportsIgnoreCase`. `indentStyle` accepts `0`, `1`, and `2` for `none`, `block`, and `smart`.
 
 </details>
 
