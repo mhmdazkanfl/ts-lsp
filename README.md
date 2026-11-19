@@ -294,19 +294,19 @@ Completion and workspace-symbol labels use TypeScript syntax highlighting for re
 
 TypeScript implements these features. Exposing them requires support in Zed's Rust LSP client. The extension API covers launch, configuration, and labels, with no hook for adding arbitrary LSP requests or editor actions.
 
-| TypeScript LSP feature | Why it is unavailable through the fork |
-| --- | --- |
-| LSP selection ranges (`textDocument/selectionRange`) | Zed expands selections using its syntax tree. Its selection action does not request ranges from the server. |
-| Range semantic tokens (`textDocument/semanticTokens/range`) | Zed requests full-document tokens for semantic highlighting. It does not send the range request. |
-| Separate Go to Source Definition action (`custom/textDocument/sourceDefinition`) | Zed has no action wired to the custom request. `preferGoToSourceDefinition` lets the existing Go to Definition action prefer source files. |
-| Multi-document highlights (`custom/textDocument/multiDocumentHighlight`) | Zed requests standard highlights for the current document. Cross-file highlights need client support. |
-| Visual Studio grouped references (`textDocument/_vs_references`) | Zed uses standard Find References. The grouped response needs a client handler. |
-| Visual Studio auto-insert (`textDocument/_vs_onAutoInsert`) | Zed does not send this request on trigger characters, so it cannot apply the returned edits. |
-| Expandable hovers (`experimental.hoverVerbosityLevel`) | Zed shows standard hover text. It does not negotiate TypeScript's verbosity capability or request more detail. |
-| Project info and API sessions (`custom/projectInfo`, `custom/initializeAPISession`) | Zed has no integration that invokes these TypeScript-specific requests. |
-| Content mapper contributions (`custom/setContentMapperContributions`, upstream `main`) | Zed has no client integration to register and coordinate TypeScript's content mappers. |
-| Server telemetry (`telemetry/event`) | Zed has no handler for TypeScript server telemetry events. |
-| GC, profiling, and live log-level changes (`custom/runGC`, profiling requests, `custom/setLogVerbosity`) | Zed has no actions for these developer controls. The `logVerbosity` startup option remains available. |
+| TypeScript LSP feature | Where the limitation is | Why it is unavailable through the fork |
+| --- | --- | --- |
+| LSP selection ranges (`textDocument/selectionRange`) | Zed core | Zed expands selections using its syntax tree. Its selection action does not request ranges from the server. |
+| Range semantic tokens (`textDocument/semanticTokens/range`) | Zed core | Zed requests full-document tokens for semantic highlighting. It does not send the range request. |
+| Separate Go to Source Definition action (`custom/textDocument/sourceDefinition`) | Zed core | Zed has no action wired to the custom request. `preferGoToSourceDefinition` lets the existing Go to Definition action prefer source files. |
+| Multi-document highlights (`custom/textDocument/multiDocumentHighlight`) | Zed core | Zed requests standard highlights for the current document. Cross-file highlights need client support. |
+| Visual Studio grouped references (`textDocument/_vs_references`) | Zed core | Zed uses standard Find References. The grouped response needs a client handler. |
+| Visual Studio auto-insert (`textDocument/_vs_onAutoInsert`) | Zed core | Zed does not send this request on trigger characters, so it cannot apply the returned edits. |
+| Expandable hovers (`experimental.hoverVerbosityLevel`) | Zed core | Zed shows standard hover text. It does not negotiate TypeScript's verbosity capability or request more detail. |
+| Project info and API sessions (`custom/projectInfo`, `custom/initializeAPISession`) | Zed core | Zed has no integration that invokes these TypeScript-specific requests. |
+| Content mapper contributions (`custom/setContentMapperContributions`, upstream `main`) | Zed core and TypeScript 7.0.2 | The server handler is present on upstream `main` and absent in 7.0.2. Zed also needs client integration to register and coordinate content mappers. |
+| Server telemetry (`telemetry/event`) | Zed core | Zed has no handler for TypeScript server telemetry events. |
+| GC, profiling, and live log-level changes (`custom/runGC`, profiling requests, `custom/setLogVerbosity`) | Zed core | Zed has no actions for these developer controls. The `logVerbosity` startup option remains available. |
 
 [TypeScript 7.0.2 server handlers](https://github.com/microsoft/TypeScript/blob/v7.0.2/tsc/internal/lsp/server.go#L745-L815) · [Upstream content mapper handler](https://github.com/microsoft/TypeScript/blob/9c4ad5cbc5a24f3e8893c6e395ac8981c1154c16/tsc/internal/lsp/server.go#L1368) · [Zed extension API](https://docs.rs/zed_extension_api/0.7.0/zed_extension_api/trait.Extension.html)
 
