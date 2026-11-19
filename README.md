@@ -28,173 +28,151 @@ The dev extension uses the same `tsgo` extension ID and `typescript-ls` language
 
 ## ⚙️ Configuration
 
-### Basic Setup
+### Enable the language server
 
-Enable `typescript-ls` in your Zed settings:
-
-```jsonc
-{
-    "languages": {
-        "TypeScript": {
-            "language_servers": [
-                "typescript-ls",
-                "!vtsls",
-                "!typescript-language-server",
-                "...",
-            ],
-        },
-        "TSX": {
-            "language_servers": [
-                "typescript-ls",
-                "!vtsls",
-                "!typescript-language-server",
-                "...",
-            ],
-        },
-    },
-}
-```
-
-The setup above gives TypeScript and TSX a single TypeScript server while retaining other configured servers, such as linters. You can list `vtsls` alongside `typescript-ls` when you want both servers. They can report overlapping diagnostics or completion results.
-
-```jsonc
-{
-    "languages": {
-        "TypeScript": {
-            "language_servers": [
-                "typescript-ls",
-                "vtsls",
-                "!typescript-language-server",
-                "...",
-            ],
-        },
-        "TSX": {
-            "language_servers": [
-                "typescript-ls",
-                "vtsls",
-                "!typescript-language-server",
-                "...",
-            ],
-        },
-    },
-}
-```
-
-### Advanced Configuration
-
-#### Choosing the TypeScript binary
-
-The extension uses `lsp.typescript-ls.binary.path` when configured. Otherwise it looks for a compatible project-installed `typescript` package and its matching native binary, including ancestor `node_modules` directories in a monorepo. The extension launches the native binary directly. Package layouts that expose TypeScript through `node_modules` are supported, including pnpm's isolated layout. For Yarn Plug'n'Play, set an explicit native binary path or use the managed install.
-
-If no compatible project binary is available, the extension installs the `typescript` package into its own directory. It checks for the latest release on the first managed launch in a Zed session. If the registry check or update fails, it can reuse a valid managed install. An explicit version request reports an error if the requested version cannot be installed. Restart the language server after changing its binary settings or switching the project's TypeScript version.
-
-A custom binary path can be absolute, relative to the worktree (such as `./tools/tsc`), or a command on the worktree's `PATH`. Omit `arguments` to use `--lsp --stdio`. Set `arguments` to replace the entire argument list. `env` supplies additional variables to the launched server.
+Use `typescript-ls` for the languages you want it to handle. This example disables the other TypeScript servers while keeping additional servers such as linters. To run `vtsls` alongside `typescript-ls`, replace `"!vtsls"` with `"vtsls"` for that language. Both servers may provide diagnostics and completions.
 
 ```json
+{
+  "languages": {
+    "TypeScript": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
+    "TSX": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
+    "JavaScript": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
+    "JSX": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] }
+  }
+}
+```
+
+### Full `lsp.typescript-ls` configuration
+
+This reference covers the fork's launch settings and TypeScript **7.0.2** server options. All keys are optional. Copy the settings you want to override. Some values below illustrate a choice and differ from the server defaults. Use your Zed user `settings.json` or a project's `.zed/settings.json`.
+
+```jsonc
 {
   "lsp": {
     "typescript-ls": {
       "binary": {
-        "path": "./tools/tsc",
+        // Optional absolute or worktree-relative executable path.
+        // "path": "./tools/tsc",
+        // Include both arguments when setting binary.path to native tsc.
         "arguments": ["--lsp", "--stdio"],
-        "env": { "GOMAXPROCS": "4" }
-      }
-    }
-  }
-}
-```
-
-#### Pinning a package version
-
-Set `package_version` to pin TypeScript to a native release (7.0.0 or newer). The project binary is eligible if its version matches the pin. Set `prefer_project_binary` to `false` to always use the managed package unless you supplied `binary.path`.
-
-```json
-{
-    "lsp": {
-        "typescript-ls": {
-            "settings": {
-                "package_version": "7.0.2",
-                "prefer_project_binary": false
-            }
-        }
-    }
-}
-```
-
-When an npm tag or range is used instead of an exact version, npm resolves it through the managed install. For an install error, check `zed: open log`. If a suitable project package is installed but the project lookup fails, launch Zed with `--foreground` to see the lookup error.
-
-#### Inlay Hints
-
-The extension sets defaults to make `typescript-ls` send back inlay hints when Zed has inlay hints enabled. To show them, enable Zed's `inlay_hints` setting:
-
-```json
-{
-  "inlay_hints": {
-    "enabled": true
-  }
-}
-```
-
-You can override the default inlay hint settings in your Zed settings:
-
-```json
-{
-  "lsp": {
-    "typescript-ls": {
+        // Additional environment variables. Values must be strings.
+        "env": {}
+      },
+      "initialization_options": {
+        "codeLensShowLocationsCommandName": "editor.action.showReferences",
+        "disablePushDiagnostics": false,
+        "enableTelemetry": false,
+        // 0 off, 1 trace, 2 debug, 3 info, 4 warning, 5 error.
+        "logVerbosity": 3,
+        // Fallback for clients without workspace/configuration. See notes below.
+        "userPreferences": {}
+      },
       "settings": {
-        "typescript": {
+        // Optional exact release, npm tag, or npm version range.
+        // "package_version": "7.0.2",
+        "prefer_project_binary": true,
+        "editor": {},
+        "javascript": {},
+        "typescript": {},
+        "js/ts": {
+          // A filename, such as "tsconfig.editor.json". Empty uses normal discovery.
+          "customConfigFileName": "",
+          "autoClosingTags": { "enabled": true },
+          "suggest": {
+            "autoImports": true,
+            "includeCompletionsForImportStatements": true,
+            "includeAutomaticOptionalChainCompletions": true,
+            "classMemberSnippets": { "enabled": true },
+            "objectLiteralMethodSnippets": { "enabled": true },
+            "jsdoc": { "enabled": true, "generateReturns": true }
+          },
+          "preferences": {
+            "quoteStyle": "auto", // auto, single, double
+            "jsxAttributeCompletionStyle": "auto", // auto, braces, none
+            "importModuleSpecifier": "shortest", // shortest, relative, non-relative, project-relative
+            "importModuleSpecifierEnding": "auto", // auto, minimal, index, js
+            "autoImportSpecifierExcludeRegexes": [], // Array of regex strings
+            "autoImportFileExcludePatterns": [], // Array of file glob strings
+            "autoImportEntrypointDirectorySearch": false,
+            "preferTypeOnlyAutoImports": false,
+            "useAliasesForRenames": true,
+            "organizeImports": {
+              "sort": "auto", // auto, ordinal, ordinalIgnoreCase, natural, naturalIgnoreCase
+              "caseSensitivity": "auto", // auto, caseSensitive, caseInsensitive
+              "unicodeCollation": "ordinal", // ordinal, unicode
+              "locale": "en", // Parsed for compatibility. Sorting is locale-independent in 7.0.2.
+              "numericCollation": false,
+              "accentCollation": true,
+              "caseFirst": "default", // default, lower, upper
+              "typeOrder": "auto" // auto, first, inline, last
+            }
+          },
+          "format": {
+            "enabled": true,
+            "baseIndentSize": 0,
+            "indentSize": 4,
+            "tabSize": 4,
+            "newLineCharacter": "\n",
+            "convertTabsToSpaces": true,
+            "indentStyle": "smart", // none, block, smart
+            "trimTrailingWhitespace": true,
+            "insertSpaceAfterCommaDelimiter": true,
+            "insertSpaceAfterSemicolonInForStatements": true,
+            "insertSpaceBeforeAndAfterBinaryOperators": true,
+            "insertSpaceAfterConstructor": false,
+            "insertSpaceAfterKeywordsInControlFlowStatements": true,
+            "insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,
+            "insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis": false,
+            "insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets": false,
+            "insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces": true,
+            "insertSpaceAfterOpeningAndBeforeClosingEmptyBraces": false,
+            "insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces": false,
+            "insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces": false,
+            "insertSpaceAfterTypeAssertion": false,
+            "insertSpaceBeforeFunctionParenthesis": false,
+            "placeOpenBraceOnNewLineForFunctions": false,
+            "placeOpenBraceOnNewLineForControlBlocks": false,
+            "insertSpaceBeforeTypeAnnotation": false,
+            "indentMultiLineObjectLiteralBeginningOnBlankLine": false,
+            "semicolons": "ignore", // ignore, insert, remove
+            "indentSwitchCase": true
+          },
           "inlayHints": {
             "parameterNames": {
-              "enabled": "none"
+              "enabled": "all", // none, literals, all
+              "suppressWhenArgumentMatchesName": false
             },
-            "parameterTypes": {
-              "enabled": false
-            },
-            "variableTypes": {
-              "enabled": false
-            },
-            "propertyDeclarationTypes": {
-              "enabled": false
-            },
-            "functionLikeReturnTypes": {
-              "enabled": false
-            },
-            "enumMemberValues": {
-              "enabled": false
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Use the same settings under `javascript` to override them for JavaScript.
-
-#### Code Lens
-
-The extension enables references and implementations code lenses by default. These show reference counts and implementation counts above functions, classes, and interfaces. To use them, enable Zed's `code_lens` setting:
-
-```json
-{
-  "code_lens": "on"
-}
-```
-
-You can override the default code lens settings in your Zed settings:
-
-```json
-{
-  "lsp": {
-    "typescript-ls": {
-      "settings": {
-        "typescript": {
-          "implementationsCodeLens": {
-            "enabled": false
+            "parameterTypes": { "enabled": true },
+            "variableTypes": { "enabled": true, "suppressWhenTypeMatchesName": false },
+            "propertyDeclarationTypes": { "enabled": true },
+            "functionLikeReturnTypes": { "enabled": true },
+            "enumMemberValues": { "enabled": true }
           },
-          "referencesCodeLens": {
-            "enabled": false
+          "referencesCodeLens": { "enabled": true, "showOnAllFunctions": true },
+          "implementationsCodeLens": {
+            "enabled": true,
+            "showOnAllClassMethods": true,
+            "showOnInterfaceMethods": true
+          },
+          "workspaceSymbols": { "excludeLibrarySymbols": true },
+          "validate": { "enabled": true },
+          "reportStyleChecksAsWarnings": true,
+          // Legacy ATA preference. The explicit tsserver setting below takes precedence.
+          "disableAutomaticTypeAcquisition": false,
+          "tsserver": { "automaticTypeAcquisition": { "enabled": true } },
+          "unstable": {
+            "maximumHoverLength": 500,
+            "allowRenameOfImportPath": true,
+            "preferGoToSourceDefinition": false,
+            // These fields are accepted by the 7.0.2 preference parser.
+            // They have no independent effect in its LSP implementation.
+            "lazyConfiguredProjectsFromExternalProject": false,
+            "allowTextChangesInNewFiles": false,
+            "provideRefactorNotApplicableReason": true,
+            "disableSuggestions": false,
+            "disableLineTextInReferences": true,
+            "displayPartsForJSDoc": true
           }
         }
       }
@@ -203,11 +181,95 @@ You can override the default code lens settings in your Zed settings:
 }
 ```
 
-Use the same settings under `javascript` to override them for JavaScript.
+#### Launch and startup options
 
-#### Editor feature presets
+| Setting | How the fork uses it |
+| --- | --- |
+| `binary.path` | Takes precedence over package selection. Zed launches this executable directly. Specify `binary.arguments` alongside `binary.path` when pointing at native `tsc`. |
+| `binary.arguments` | The fork supplies `["--lsp", "--stdio"]` when it selects the binary and no arguments are set. An explicit `binary.path` uses the arguments you give Zed. You can append `--pprofDir` followed by an output directory. |
+| `binary.env` | Adds string-valued environment variables to the launched server, such as `"GOMAXPROCS": "4"`. |
+| `settings.prefer_project_binary` | Defaults to `true`. Looks for a native TypeScript installation in the worktree or an ancestor's `node_modules`, including pnpm's isolated layout. Set it to `false` to use the managed install. Yarn Plug'n'Play can use a custom path or the managed install. |
+| `settings.package_version` | With no pin, the fork uses compatible project TypeScript or checks npm for a managed release. An exact pin must match the project version for the project binary to qualify. npm resolves tags and ranges through the managed install. A failed explicit version request reports an error. An unpinned launch can reuse a valid managed install when updating fails. |
+| `initialization_options.codeLensShowLocationsCommandName` | Client command used by resolved references and implementations CodeLens. Keep the extension's default `editor.action.showReferences` for Zed. |
+| `initialization_options.disablePushDiagnostics` | Disables server-pushed diagnostics when `true`. Pull diagnostics are controlled by Zed and `settings["js/ts"].validate.enabled`. |
+| `initialization_options.enableTelemetry` | Enables the server's LSP telemetry events when `true`. Default `false`. |
+| `initialization_options.logVerbosity` | Initial server logging level. Default `3` (info). |
+| `initialization_options.userPreferences` | TypeScript reads this fallback object when the LSP client lacks workspace configuration support. With Zed, put preferences under `settings`. |
 
-For a minimal setup, use the single-server configuration above and leave Zed's editor settings at their defaults. For more language-server UI, merge the following settings with your existing configuration. `combined` overlays semantic tokens on Tree-sitter highlighting. Zed enables pull diagnostics and linked editing by default, so set those explicitly only if you have overridden them elsewhere.
+Restart the language server after changing its launch or initialization settings. Use `lsp.typescript-ls` for new settings. The fork also reads `lsp.tsgo` as a fallback for existing configurations.
+
+Zed's per-server schema also accepts `binary.ignore_system_version`, `fetch.pre_release`, and `enable_lsp_tasks`. These fields have no effect on this fork's binary selection or on the TypeScript 7.0.2 server. Use `prefer_project_binary` and `package_version` for binary and release selection.
+
+#### Workspace preference precedence
+
+TypeScript 7.0.2 builds a shared preference set by applying `editor`, `javascript`, `typescript`, and the literal `js/ts` key in that order. Later sections override earlier sections. Use `js/ts` for settings that should take precedence over the fork's built-in inlay hint and CodeLens defaults, which it supplies under `javascript` and `typescript`.
+
+- `editor` accepts the flat preference keys, such as `tabSize` and `convertTabsToSpaces`. The other three sections accept nested keys, flat keys, and an `unstable` object containing flat keys. Within each of those sections, `unstable` overrides top-level flat keys, and recognized nested settings take precedence over both.
+- A custom `customConfigFileName` is a filename only, such as `tsconfig.editor.json`. The server falls back to `tsconfig.json` or `jsconfig.json` when it can't find the custom file. Set compiler options in the project config.
+- `unstable.preferGoToSourceDefinition: true` makes the existing Go to Definition action prefer source files where the server can find them.
+- Zed sends `tab_size`, `hard_tabs`, and `remove_trailing_whitespace_on_save` with formatting requests. TypeScript uses those request values for tab width, indent width, tabs versus spaces, and trailing-whitespace handling. To use TypeScript's formatter, set `"formatter": "language_server"` for the relevant languages.
+- `autoClosingTags.enabled` controls the server's auto-insert handler. Any feature that needs an editor action still depends on Zed's client support.
+
+<details>
+<summary>Flat preference aliases and compatibility keys</summary>
+
+Use the right-hand key as a literal name inside a section's `unstable` object or directly inside `editor`. Formatting fields use their leaf names, such as `semicolons` and `indentSize`, except `format.enabled`, whose flat key is `formatEnabled`.
+
+| Nested key | Flat key |
+| --- | --- |
+| `preferences.quoteStyle` | `quotePreference` |
+| `preferences.jsxAttributeCompletionStyle` | `jsxAttributeCompletionStyle` |
+| `preferences.importModuleSpecifier` | `importModuleSpecifierPreference` |
+| `preferences.importModuleSpecifierEnding` | `importModuleSpecifierEnding` |
+| `preferences.autoImportSpecifierExcludeRegexes` | `autoImportSpecifierExcludeRegexes` |
+| `preferences.autoImportFileExcludePatterns` | `autoImportFileExcludePatterns` |
+| `preferences.autoImportEntrypointDirectorySearch` | `autoImportEntrypointDirectorySearch` |
+| `preferences.preferTypeOnlyAutoImports` | `preferTypeOnlyAutoImports` |
+| `preferences.useAliasesForRenames` | `providePrefixAndSuffixTextForRename` |
+| `preferences.organizeImports.sort` | `organizeImportsSort` |
+| `preferences.organizeImports.caseSensitivity` | `organizeImportsIgnoreCase` (`true` for case-insensitive, `false` for case-sensitive) |
+| `preferences.organizeImports.unicodeCollation` | `organizeImportsCollation` |
+| `preferences.organizeImports.locale` | `organizeImportsLocale` |
+| `preferences.organizeImports.numericCollation` | `organizeImportsNumericCollation` |
+| `preferences.organizeImports.accentCollation` | `organizeImportsAccentCollation` |
+| `preferences.organizeImports.caseFirst` | `organizeImportsCaseFirst` |
+| `preferences.organizeImports.typeOrder` | `organizeImportsTypeOrder` |
+| `suggest.autoImports` | `includeCompletionsForModuleExports` |
+| `suggest.includeCompletionsForImportStatements` | `includeCompletionsForImportStatements` |
+| `suggest.includeAutomaticOptionalChainCompletions` | `includeAutomaticOptionalChainCompletions` |
+| `suggest.classMemberSnippets.enabled` | `includeCompletionsWithClassMemberSnippets` |
+| `suggest.objectLiteralMethodSnippets.enabled` | `includeCompletionsWithObjectLiteralMethodSnippets` |
+| `suggest.jsdoc.enabled` | `completeJSDocs` |
+| `suggest.jsdoc.generateReturns` | `generateReturnInDocTemplate` |
+| `autoClosingTags.enabled` | `autoClosingTags` (boolean) |
+| `inlayHints.parameterNames.enabled` | `includeInlayParameterNameHints` |
+| `inlayHints.parameterNames.suppressWhenArgumentMatchesName` | `includeInlayParameterNameHintsWhenArgumentMatchesName` (inverted boolean) |
+| `inlayHints.parameterTypes.enabled` | `includeInlayFunctionParameterTypeHints` |
+| `inlayHints.variableTypes.enabled` | `includeInlayVariableTypeHints` |
+| `inlayHints.variableTypes.suppressWhenTypeMatchesName` | `includeInlayVariableTypeHintsWhenTypeMatchesName` (inverted boolean) |
+| `inlayHints.propertyDeclarationTypes.enabled` | `includeInlayPropertyDeclarationTypeHints` |
+| `inlayHints.functionLikeReturnTypes.enabled` | `includeInlayFunctionLikeReturnTypeHints` |
+| `inlayHints.enumMemberValues.enabled` | `includeInlayEnumMemberValueHints` |
+| `referencesCodeLens.enabled` | `referencesCodeLensEnabled` |
+| `referencesCodeLens.showOnAllFunctions` | `referencesCodeLensShowOnAllFunctions` |
+| `implementationsCodeLens.enabled` | `implementationsCodeLensEnabled` |
+| `implementationsCodeLens.showOnAllClassMethods` | `implementationsCodeLensShowOnAllClassMethods` |
+| `implementationsCodeLens.showOnInterfaceMethods` | `implementationsCodeLensShowOnInterfaceMethods` |
+| `format.enabled` | `formatEnabled` |
+| `validate.enabled` | `validateEnabled` |
+| `workspaceSymbols.excludeLibrarySymbols` | `excludeLibrarySymbolsInNavTo` |
+| `tsserver.automaticTypeAcquisition.enabled` | `automaticTypeAcquisitionEnabled` |
+| `disableAutomaticTypeAcquisition`, `reportStyleChecksAsWarnings`, `customConfigFileName` | Same name |
+
+TypeScript also accepts `autoClosingTags` as a boolean, `suggest.completeJSDocs`, `format.enable`, and `validate.enable` as compatibility keys when their canonical nested counterparts are absent. `caseSensitivity` also accepts booleans with the same meaning as `organizeImportsIgnoreCase`. `indentStyle` accepts `0`, `1`, and `2` for `none`, `block`, and `smart`.
+
+</details>
+
+[Zed's LSP settings](https://zed.dev/docs/reference/all-settings#lsp) · [TypeScript 7.0.2 startup options](https://github.com/microsoft/TypeScript/blob/v7.0.2/tsc/internal/lsp/lsproto/lsp_generated.go#L8774-L8790) · [Workspace preferences](https://github.com/microsoft/TypeScript/blob/v7.0.2/tsc/internal/ls/lsutil/userpreferences.go) · [Formatting options](https://github.com/microsoft/TypeScript/blob/v7.0.2/tsc/internal/ls/lsutil/formatcodeoptions.go)
+
+### Editor feature presets
+
+The `lsp` block configures the server. Zed's editor settings control which results you see. The example below enables semantic highlighting, LSP folding, inlay hints, and CodeLens. Zed enables linked editing and pull diagnostics by default.
 
 ```json
 {
@@ -226,11 +288,11 @@ For a minimal setup, use the single-server configuration above and leave Zed's e
 
 Completion and workspace-symbol labels use TypeScript syntax highlighting for recognized symbol kinds. The extension keeps Zed's built-in presentation for other kinds.
 
-[Zed's language-server settings](https://zed.dev/docs/configuring-languages#using-language-server-features)
+[Zed's language-server settings](https://zed.dev/docs/configuring-languages#using-language-server-features) · [Global LSP settings](https://zed.dev/docs/reference/all-settings#global-lsp-settings)
 
 ### Zed client support
 
-Zed's LSP client controls which protocol features surface in the editor. The extension API exposes server launch, configuration, and label hooks. LSP selection ranges, range-based semantic token requests, and TypeScript-specific actions such as Go to Source Definition require client support in Zed.
+Zed's LSP client controls which protocol features surface in the editor. The extension API exposes server launch, configuration, and label hooks. LSP selection ranges, range-based semantic token requests, and a separate Go to Source Definition action require client support in Zed.
 
 [Zed's extension API](https://docs.rs/zed_extension_api/0.7.0/zed_extension_api/trait.Extension.html)
 
