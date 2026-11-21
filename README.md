@@ -24,33 +24,33 @@ With TypeScript 7, Microsoft shipped the TypeScript compiler as a native version
 1. Install Rust with `rustup` and clone this repository.
 2. In Zed, run `zed: install dev extension` and select the checkout containing `extension.toml`.
 
-The dev extension uses the same `tsgo` extension ID and `typescript-ls` language server ID as upstream. Zed treats it as a development override of the published extension.
+The dev extension uses `ts-lsp` as both its extension ID and its language server ID.
 
 ## ⚙️ Configuration
 
 ### Enable the language server
 
-Use `typescript-ls` for the languages you want it to handle. This example disables the other TypeScript servers while keeping additional servers such as linters. To run `vtsls` alongside `typescript-ls`, replace `"!vtsls"` with `"vtsls"` for that language. Both servers may provide diagnostics and completions.
+Use `ts-lsp` for the languages you want it to handle. This example disables the other TypeScript servers while keeping additional servers such as linters. To run `vtsls` alongside `ts-lsp`, replace `"!vtsls"` with `"vtsls"` for that language. Both servers may provide diagnostics and completions.
 
 ```json
 {
   "languages": {
-    "TypeScript": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
-    "TSX": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
-    "JavaScript": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] },
-    "JSX": { "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."] }
+    "TypeScript": { "language_servers": ["ts-lsp", "!vtsls", "!typescript-language-server", "..."] },
+    "TSX": { "language_servers": ["ts-lsp", "!vtsls", "!typescript-language-server", "..."] },
+    "JavaScript": { "language_servers": ["ts-lsp", "!vtsls", "!typescript-language-server", "..."] },
+    "JSX": { "language_servers": ["ts-lsp", "!vtsls", "!typescript-language-server", "..."] }
   }
 }
 ```
 
-### Full `lsp.typescript-ls` configuration
+### Full `lsp.ts-lsp` configuration
 
 This reference covers settings that affect server startup, TypeScript **7.0.2** LSP behavior, or Zed's integration with the server. All keys are optional. Copy the settings you want to override. Some values below illustrate a choice and differ from the server defaults. Use your Zed user `settings.json` or a project's `.zed/settings.json`.
 
 ```jsonc
 {
   "lsp": {
-    "typescript-ls": {
+    "ts-lsp": {
       "binary": {
         // Optional absolute or worktree-relative executable path.
         // "path": "./tools/tsc",
@@ -178,7 +178,7 @@ This reference covers settings that affect server startup, TypeScript **7.0.2** 
 | `initialization_options.enableTelemetry` | Enables the server's LSP telemetry events when `true`. Default `false`. Zed has no UI for these events. |
 | `initialization_options.logVerbosity` | Initial server logging level. Default `3` (info). |
 
-Restart the language server after changing its launch or initialization settings. Use `lsp.typescript-ls` for new settings. The fork also reads `lsp.tsgo` as a fallback for existing configurations.
+Restart the language server after changing its launch or initialization settings. Use `lsp.ts-lsp` for new settings. The fork also reads `lsp.tsgo` as a fallback for existing configurations.
 
 #### Workspace preference precedence
 
