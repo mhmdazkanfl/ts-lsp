@@ -10,7 +10,7 @@ const platformPackage = '@typescript/typescript-test-platform';
 const binaryName = process.platform === 'win32' ? 'tsc.exe' : 'tsc';
 
 function temporaryProject(t) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tsgo test '));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-lsp test '));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     return fs.realpathSync(root);
 }

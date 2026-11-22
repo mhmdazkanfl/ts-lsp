@@ -1,4 +1,4 @@
-# tsgo: Native TypeScript Compiler Integration for Zed
+# ts-lsp: Native TypeScript Compiler Integration for Zed
 
 This extension integrates TypeScript v7's native Go-based compiler and language server into the Zed editor, delivering enhanced performance and efficiency for TypeScript development.
 
@@ -178,7 +178,7 @@ This reference covers settings that affect server startup, TypeScript **7.0.2** 
 | `initialization_options.enableTelemetry` | Enables the server's LSP telemetry events when `true`. Default `false`. Zed has no UI for these events. |
 | `initialization_options.logVerbosity` | Initial server logging level. Default `3` (info). |
 
-Restart the language server after changing its launch or initialization settings. Use `lsp.ts-lsp` for new settings. The fork also reads `lsp.tsgo` as a fallback for existing configurations.
+Restart the language server after changing its launch or initialization settings under `lsp.ts-lsp`.
 
 #### Workspace preference precedence
 
