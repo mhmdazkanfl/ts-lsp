@@ -28,11 +28,7 @@ fn merge_json_value_into(source: Value, target: &mut Value) {
             }
         }
 
-        (Value::Array(source), Value::Array(target)) => {
-            for value in source {
-                target.push(value);
-            }
-        }
+        (Value::Array(source), Value::Array(target)) => target.extend(source),
 
         (source, target) => *target = source,
     }
@@ -48,7 +44,7 @@ impl zed::Extension for TsGoExtension {
         id: &LanguageServerId,
         worktree: &Worktree,
     ) -> Result<zed::Command> {
-        let settings = LspSettingsWithFallback::for_worktree(id, FALLBACK_KEY, worktree)?;
+        let settings = lsp_settings_for_worktree(id, worktree)?;
         let options = settings.get_setting(|settings| settings.settings.as_ref());
         let package_version = options
             .and_then(|options| options.get("package_version"))
@@ -57,19 +53,13 @@ impl zed::Extension for TsGoExtension {
             .and_then(|options| options.get("prefer_project_binary"))
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let binary = CommandSettings {
-            path: settings
-                .get_setting(|settings| settings.binary.as_ref()?.path.as_ref())
-                .cloned(),
-            arguments: settings
-                .get_setting(|settings| settings.binary.as_ref()?.arguments.as_ref())
-                .cloned(),
-            env: settings
-                .get_setting(|settings| settings.binary.as_ref()?.env.as_ref())
-                .cloned(),
-        };
-        self.binaries
-            .command(id, worktree, binary, package_version, prefer_project_binary)
+        self.binaries.command(
+            id,
+            worktree,
+            settings.binary(),
+            package_version,
+            prefer_project_binary,
+        )
     }
 
     fn language_server_initialization_options(
@@ -81,9 +71,8 @@ impl zed::Extension for TsGoExtension {
             "codeLensShowLocationsCommandName": "editor.action.showReferences"
         });
 
-        if let Some(user_initialization_options) =
-            LspSettingsWithFallback::for_worktree(server_id, FALLBACK_KEY, worktree)?
-                .into_setting(|lsp_settings| lsp_settings.initialization_options)
+        if let Some(user_initialization_options) = lsp_settings_for_worktree(server_id, worktree)?
+            .into_setting(|lsp_settings| lsp_settings.initialization_options)
         {
             merge_json_value_into(user_initialization_options, &mut initialization_options);
         }
@@ -135,9 +124,8 @@ impl zed::Extension for TsGoExtension {
             "javascript": config
         });
 
-        if let Some(user_settings) =
-            LspSettingsWithFallback::for_worktree(server_id, FALLBACK_KEY, worktree)?
-                .into_setting(|lsp_settings| lsp_settings.settings)
+        if let Some(user_settings) = lsp_settings_for_worktree(server_id, worktree)?
+            .into_setting(|lsp_settings| lsp_settings.settings)
         {
             let mut user_settings = user_settings;
             if let Some(object) = user_settings.as_object_mut() {
@@ -167,50 +155,151 @@ impl zed::Extension for TsGoExtension {
     }
 }
 
-struct LspSettingsWithFallback<'a> {
-    settings: LspSettings,
-    fallback_id: &'static str,
-    fallback_settings: OnceCell<Option<LspSettings>>,
-    worktree: &'a Worktree,
+fn lsp_settings_for_worktree(
+    server_id: &LanguageServerId,
+    worktree: &Worktree,
+) -> Result<LspSettingsWithFallback<impl Fn() -> Option<LspSettings>>> {
+    let settings = LspSettings::for_worktree(server_id.as_ref(), worktree)?;
+    Ok(LspSettingsWithFallback::new(settings, move || {
+        LspSettings::for_worktree(FALLBACK_KEY, worktree).ok()
+    }))
 }
 
-impl<'a> LspSettingsWithFallback<'a> {
-    fn for_worktree(
-        server_id: &LanguageServerId,
-        fallback_id: &'static str,
-        worktree: &'a Worktree,
-    ) -> zed_extension_api::Result<Self> {
-        LspSettings::for_worktree(server_id.as_ref(), worktree).map(|settings| Self {
+struct LspSettingsWithFallback<F> {
+    settings: LspSettings,
+    fallback_settings: OnceCell<Option<LspSettings>>,
+    load_fallback: F,
+}
+
+impl<F: Fn() -> Option<LspSettings>> LspSettingsWithFallback<F> {
+    fn new(settings: LspSettings, load_fallback: F) -> Self {
+        Self {
             settings,
-            fallback_id,
             fallback_settings: OnceCell::new(),
-            worktree,
-        })
+            load_fallback,
+        }
     }
 
-    fn get_setting<F, R>(&self, f: F) -> Option<&R>
-    where
-        F: Fn(&LspSettings) -> Option<&R>,
-    {
+    fn binary(&self) -> CommandSettings {
+        CommandSettings {
+            path: self
+                .get_setting(|settings| settings.binary.as_ref()?.path.as_ref())
+                .cloned(),
+            arguments: self
+                .get_setting(|settings| settings.binary.as_ref()?.arguments.as_ref())
+                .cloned(),
+            env: self
+                .get_setting(|settings| settings.binary.as_ref()?.env.as_ref())
+                .cloned(),
+        }
+    }
+
+    fn get_setting<R>(&self, f: impl Fn(&LspSettings) -> Option<&R>) -> Option<&R> {
         f(&self.settings).or_else(|| {
             self.fallback_settings
-                .get_or_init(|| LspSettings::for_worktree(self.fallback_id, self.worktree).ok())
+                .get_or_init(&self.load_fallback)
                 .as_ref()
                 .and_then(f)
         })
     }
 
-    fn into_setting<F, R>(self, f: F) -> Option<R>
-    where
-        F: Fn(LspSettings) -> Option<R>,
-    {
+    fn into_setting<R>(self, f: impl Fn(LspSettings) -> Option<R>) -> Option<R> {
         f(self.settings).or_else(|| {
-            let _ = self
-                .fallback_settings
-                .get_or_init(|| LspSettings::for_worktree(self.fallback_id, self.worktree).ok());
-            self.fallback_settings.into_inner().flatten().and_then(f)
+            self.fallback_settings
+                .into_inner()
+                .unwrap_or_else(self.load_fallback)
+                .and_then(f)
         })
     }
 }
 
 zed::register_extension!(TsGoExtension);
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn fills_missing_binary_fields_from_legacy_settings() {
+        let current = zed::serde_json::from_value(json!({
+            "binary": { "path": "tools/current-tsc", "arguments": [] }
+        }))
+        .unwrap();
+        let legacy_loads = Cell::new(0);
+        let settings = LspSettingsWithFallback::new(current, || {
+            legacy_loads.update(|loads| loads + 1);
+            Some(
+                zed::serde_json::from_value(json!({
+                    "binary": {
+                        "path": "tools/legacy-tsc",
+                        "arguments": ["--legacy"],
+                        "env": { "GOMAXPROCS": "4" }
+                    },
+                    "settings": { "package_version": "7.0.2" }
+                }))
+                .unwrap(),
+            )
+        });
+
+        let expected = zed::serde_json::from_value(json!({
+            "path": "tools/current-tsc", "arguments": [], "env": { "GOMAXPROCS": "4" }
+        }))
+        .unwrap();
+        assert_eq!(settings.binary(), expected);
+        assert_eq!(settings.binary(), expected);
+        assert_eq!(
+            settings.into_setting(|settings| settings.settings),
+            Some(json!({ "package_version": "7.0.2" }))
+        );
+        assert_eq!(legacy_loads.get(), 1);
+    }
+
+    #[test]
+    fn prefers_the_current_settings_object_even_when_empty() {
+        let current = LspSettings {
+            settings: Some(json!({})),
+            ..LspSettings::default()
+        };
+        let settings = LspSettingsWithFallback::new(current, || panic!("unexpected legacy lookup"));
+
+        assert_eq!(
+            settings.get_setting(|settings| settings.settings.as_ref()),
+            Some(&json!({}))
+        );
+        assert_eq!(
+            settings.into_setting(|settings| settings.settings),
+            Some(json!({}))
+        );
+    }
+
+    #[test]
+    fn loads_legacy_initialization_options_when_current_options_are_missing() {
+        let settings = LspSettingsWithFallback::new(LspSettings::default(), || {
+            Some(LspSettings {
+                initialization_options: Some(json!({ "logVerbosity": 2 })),
+                ..LspSettings::default()
+            })
+        });
+
+        assert_eq!(
+            settings.into_setting(|settings| settings.initialization_options),
+            Some(json!({ "logVerbosity": 2 }))
+        );
+    }
+
+    #[test]
+    fn merges_objects_and_appends_array_items_in_order() {
+        let mut target = json!({ "nested": { "keep": true, "list": [1], "replace": false } });
+        merge_json_value_into(
+            json!({ "nested": { "list": [2, 3], "replace": true } }),
+            &mut target,
+        );
+
+        assert_eq!(
+            target,
+            json!({ "nested": { "keep": true, "list": [1, 2, 3], "replace": true } })
+        );
+    }
+}

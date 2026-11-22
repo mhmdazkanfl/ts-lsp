@@ -1,11 +1,17 @@
 use std::{
     fs,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
 };
 
 use semver::Version;
-use zed_extension_api::{self as zed, LanguageServerId, LanguageServerInstallationStatus, Result};
+use zed_extension_api::{
+    self as zed, LanguageServerId, LanguageServerInstallationStatus as Status, Result,
+};
 use zed_extension_api::{Worktree, serde_json::Value, settings::CommandSettings};
+
+#[cfg(test)]
+mod tests;
 
 const PACKAGE_NAME: &str = "typescript";
 const DEFAULT_ARGUMENTS: [&str; 2] = ["--lsp", "--stdio"];
@@ -76,30 +82,50 @@ impl PlatformPackage {
             .map_err(|error| error.to_string())
     }
 
-    fn installed(&self) -> Result<ManagedBinary> {
-        self.read_installed(&Self::modules_dir()?)
-    }
-
     fn remove_incomplete_package(&self, modules: &Path) -> Result<()> {
         let directory = modules.join(&self.name);
-        if directory.is_dir()
-            && (!directory.join("lib").join(self.binary_name).is_file()
-                || package_version(&directory.join("package.json"), &self.name).is_err())
-        {
-            // npm can report an existing package as up to date even if its executable is missing.
-            fs::remove_dir_all(&directory)
-                .map_err(|error| format!("Could not repair {}: {error}", directory.display()))?;
+        match directory.metadata() {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect {}: {error}",
+                    directory.display()
+                ));
+            }
         }
-        Ok(())
+
+        let manifest = directory.join("package.json");
+        let valid_manifest = match package_version(&manifest, &self.name) {
+            Ok(_) => true,
+            Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::InvalidData) => {
+                false
+            }
+            Err(error) => return Err(format!("Could not read {}: {error}", manifest.display())),
+        };
+        let has_binary = executable_file_exists(&directory.join("lib").join(self.binary_name))?;
+        if valid_manifest && has_binary {
+            return Ok(());
+        }
+
+        // npm can report an existing package as up to date even if its executable is missing.
+        match fs::remove_dir_all(&directory) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("Could not repair {}: {error}", directory.display())),
+        }
     }
 
     fn read_installed(&self, modules: &Path) -> Result<ManagedBinary> {
+        let read_version = |directory: &Path, name: &str| {
+            let path = directory.join("package.json");
+            package_version(&path, name)
+                .map_err(|error| format!("Could not read {}: {error}", path.display()))
+        };
         let package_dir = modules.join(&self.name);
-        let native_version = package_version(&package_dir.join("package.json"), &self.name)?;
-        let version = package_version(
-            &modules.join(PACKAGE_NAME).join("package.json"),
-            PACKAGE_NAME,
-        )?;
+        let native_version = read_version(&package_dir, &self.name)?;
+        let version = read_version(&modules.join(PACKAGE_NAME), PACKAGE_NAME)?;
         if version.major < 7 || version != native_version {
             return Err(format!(
                 "Installed TypeScript ({version}) and {} ({native_version}) must be matching native versions",
@@ -107,7 +133,7 @@ impl PlatformPackage {
             ));
         }
         let path = package_dir.join("lib").join(self.binary_name);
-        if !path.is_file() {
+        if !executable_file_exists(&path)? {
             return Err(format!(
                 "Native TypeScript executable is missing at {}",
                 path.display()
@@ -117,19 +143,55 @@ impl PlatformPackage {
     }
 }
 
-fn package_version(path: &Path, package_name: &str) -> Result<Version> {
-    let contents =
-        fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let manifest: Value = zed::serde_json::from_str(&contents)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    if manifest.get("name").and_then(Value::as_str) != Some(package_name) {
-        return Err(format!("Expected {package_name} at {}", path.display()));
+fn executable_file_exists(path: &Path) -> Result<bool> {
+    match path.metadata() {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+            Ok(false)
+        }
+        Err(error) => Err(format!("Could not inspect {}: {error}", path.display())),
     }
-    manifest
+}
+
+fn package_version(path: &Path, package_name: &str) -> io::Result<Version> {
+    let contents = fs::read(path)?;
+    let manifest: Value = zed::serde_json::from_slice(&contents)
+        .map_err(|error| io::Error::new(ErrorKind::InvalidData, error))?;
+    if manifest.get("name").and_then(Value::as_str) != Some(package_name) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("Expected package name {package_name}"),
+        ));
+    }
+    let version = manifest
         .get("version")
         .and_then(Value::as_str)
-        .and_then(|version| version.parse().ok())
-        .ok_or_else(|| format!("Invalid version in {}", path.display()))
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Missing or non-string version"))?;
+    version
+        .parse()
+        .map_err(|error| io::Error::new(ErrorKind::InvalidData, error))
+}
+
+trait Npm {
+    fn latest_version(&self) -> Result<String>;
+    fn install(&self, target: &str) -> Result<()>;
+    fn set_status(&self, status: Status);
+}
+
+struct ZedNpm<'a>(&'a LanguageServerId);
+
+impl Npm for ZedNpm<'_> {
+    fn latest_version(&self) -> Result<String> {
+        zed::npm_package_latest_version(PACKAGE_NAME)
+    }
+
+    fn install(&self, target: &str) -> Result<()> {
+        zed::npm_install_package(PACKAGE_NAME, target)
+    }
+
+    fn set_status(&self, status: Status) {
+        zed::set_language_server_installation_status(self.0, &status);
+    }
 }
 
 impl BinaryResolver {
@@ -148,7 +210,7 @@ impl BinaryResolver {
         } else {
             self.resolve(id, worktree, package_version, prefer_project_binary)?
         };
-        zed::set_language_server_installation_status(id, &LanguageServerInstallationStatus::None);
+        zed::set_language_server_installation_status(id, &Status::None);
         Ok(zed::Command {
             command,
             args: binary
@@ -165,8 +227,6 @@ impl BinaryResolver {
         selector: Option<&str>,
         prefer_project_binary: bool,
     ) -> Result<String> {
-        use LanguageServerInstallationStatus as Status;
-
         let platform = PlatformPackage::current()?;
         let pin = selector.and_then(|version| version.parse::<Version>().ok());
         if let Some(version) = &pin
@@ -184,67 +244,90 @@ impl BinaryResolver {
             }
         }
 
-        let installed = platform.installed().ok();
+        let npm = ZedNpm(id);
+        let result = PlatformPackage::modules_dir().and_then(|modules| {
+            self.resolve_managed(&platform, &modules, selector, pin.as_ref(), &npm)
+        });
+        if let Err(error) = &result {
+            npm.set_status(Status::Failed(error.clone()));
+        }
+        result.map(|path| path.display().to_string())
+    }
+
+    fn resolve_managed(
+        &mut self,
+        platform: &PlatformPackage,
+        modules: &Path,
+        selector: Option<&str>,
+        pin: Option<&Version>,
+        npm: &impl Npm,
+    ) -> Result<PathBuf> {
         let reusable_version = if selector.is_none() {
             self.checked_latest.as_ref()
         } else {
-            pin.as_ref()
+            pin
         };
-        if let Some(binary) = installed
-            .as_ref()
-            .filter(|binary| reusable_version == Some(&binary.version))
-        {
-            return Ok(binary.path.display().to_string());
-        }
+        let installed = match platform.read_installed(modules) {
+            Ok(binary) if reusable_version == Some(&binary.version) => return Ok(binary.path),
+            installed => installed,
+        };
 
-        zed::set_language_server_installation_status(id, &Status::CheckingForUpdate);
+        npm.set_status(Status::CheckingForUpdate);
         let (target, lookup_error) = match selector {
             Some(selector) => (selector.to_owned(), None),
-            None => match zed::npm_package_latest_version(PACKAGE_NAME) {
+            None => match npm.latest_version() {
                 Ok(version) => (version, None),
                 Err(error) => ("latest".into(), Some(error)),
             },
         };
         let target_version = target.parse::<Version>().ok();
-        if let Some(binary) = installed {
+        if let Ok(binary) = installed {
             if target_version.as_ref() == Some(&binary.version) {
                 if selector.is_none() {
                     self.checked_latest = Some(binary.version);
                 }
-                return Ok(binary.path.display().to_string());
+                return Ok(binary.path);
             }
             if let Some(error) = &lookup_error {
                 eprintln!(
                     "TypeScript update check failed, using installed {}: {error}",
                     binary.version
                 );
-                return Ok(binary.path.display().to_string());
+                return Ok(binary.path);
             }
         }
 
-        zed::set_language_server_installation_status(id, &Status::Downloading);
-        match install(&platform, &target, target_version.as_ref()) {
+        let with_lookup_error = |error| match &lookup_error {
+            Some(lookup_error) => {
+                format!("Could not check the latest TypeScript version ({lookup_error}). {error}")
+            }
+            None => error,
+        };
+        npm.set_status(Status::Downloading);
+        platform
+            .remove_incomplete_package(modules)
+            .map_err(with_lookup_error)?;
+        match install(platform, modules, &target, target_version.as_ref(), npm) {
             Ok(binary) => {
                 if selector.is_none() {
                     self.checked_latest = Some(binary.version);
                 }
-                Ok(binary.path.display().to_string())
+                Ok(binary.path)
             }
             Err(error) => {
-                let error = match lookup_error {
-                    Some(lookup_error) => format!(
-                        "Could not check the latest TypeScript version ({lookup_error}). {error}"
-                    ),
-                    None => error,
-                };
-                if selector.is_none()
-                    && let Ok(binary) = platform.installed()
-                {
-                    eprintln!("{error} Using installed TypeScript {}.", binary.version);
-                    return Ok(binary.path.display().to_string());
+                let error = with_lookup_error(error);
+                if selector.is_some() {
+                    return Err(error);
                 }
-                zed::set_language_server_installation_status(id, &Status::Failed(error.clone()));
-                Err(error)
+                match platform.read_installed(modules) {
+                    Ok(binary) => {
+                        eprintln!("{error} Using installed TypeScript {}.", binary.version);
+                        Ok(binary.path)
+                    }
+                    Err(installed_error) => Err(format!(
+                        "{error} Could not use the managed TypeScript installation: {installed_error}"
+                    )),
+                }
             }
         }
     }
@@ -252,13 +335,14 @@ impl BinaryResolver {
 
 fn install(
     platform: &PlatformPackage,
+    modules: &Path,
     target: &str,
     exact: Option<&Version>,
+    npm: &impl Npm,
 ) -> Result<ManagedBinary> {
-    platform.remove_incomplete_package(&PlatformPackage::modules_dir()?)?;
-    zed::npm_install_package(PACKAGE_NAME, target)
+    npm.install(target)
         .map_err(|error| format!("Could not install TypeScript {target}: {error}"))?;
-    let binary = platform.installed().map_err(|error| {
+    let binary = platform.read_installed(modules).map_err(|error| {
         format!(
             "TypeScript {target} was installed but its native executable is unavailable: {error}"
         )

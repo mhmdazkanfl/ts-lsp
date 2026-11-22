@@ -17,3 +17,4 @@ name = "TypeScript Language Server"
 #   javascript -> ScriptKindJS, javascriptreact -> ScriptKindJSX
 language_ids = { TypeScript = "typescript", TSX = "typescriptreact", JavaScript = "javascript", JSX = "javascriptreact" }
 languages = ["TypeScript", "TSX", "JavaScript", "JSX"]
+opt_in_languages = ["TypeScript", "TSX", "JavaScript", "JSX"]
