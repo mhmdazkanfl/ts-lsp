@@ -1,3 +1,5 @@
+#:schema ./docs/extension.schema.json
+#
 id = "ts-lsp"
 name = "TypeScript Language Server"
 description = "TypeScript v7's native language server."
@@ -13,7 +15,6 @@ command = "*"
 args = ["--no-global-search-paths", "--eval", "*", "--", "*", "*", "*", "*"]
 
 [language_servers.ts-lsp]
-name = "TypeScript Language Server"
 # The native TypeScript server determines ScriptKind from LSP languageId (textDocument/didOpen).
 # ScriptKind enum definition: https://github.com/microsoft/typescript-go/blob/main/internal/parser/parser.go (search for "type ScriptKind")
 # Panic location (initializeState): https://github.com/microsoft/typescript-go/blob/main/internal/parser/parser.go#L210

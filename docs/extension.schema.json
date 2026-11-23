@@ -1,0 +1,398 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Source: https://github.com/zed-industries/zed/blob/10113795dffdde78b274c9455fc9c1f3234bf564/crates/extension/src/extension_manifest.rs",
+  "title": "Zed extension.toml",
+  "description": "Manifest for a Zed extension, pinned to Zed 1.31.0 (dev). Unknown keys are flagged so misspellings and ignored fields are visible in the editor. See extension-manifest.md for build and publishing checks.",
+  "x-zed-source": {
+    "version": "1.31.0",
+    "channel": "dev",
+    "commit": "10113795dffdde78b274c9455fc9c1f3234bf564"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "schema_version"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique extension identifier. For publishing, use kebab-case and omit the words `zed` and `extension`.",
+      "examples": ["my-language-server"]
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name shown for the extension. The publishing CLI requires a nonblank name.",
+      "examples": ["My Language Server"]
+    },
+    "version": {
+      "type": "string",
+      "description": "Release version of the extension. Use a semantic version for releases. Keep the gallery entry's version in sync when publishing.",
+      "examples": ["1.0.0", "1.0.0-beta.1"]
+    },
+    "schema_version": {
+      "type": "integer",
+      "description": "Manifest format version. Use 1 for extension.toml. Legacy version 0 rebuilds the languages, themes, and grammars lists from disk during resource discovery.",
+      "enum": [1, 0],
+      "default": 1,
+      "x-taplo": {
+        "docs": {
+          "enumValues": ["Current TOML manifest format.", "Legacy extension.json compatibility behavior."]
+        }
+      }
+    },
+    "description": {
+      "type": "string",
+      "description": "Short summary of what the extension provides. Publishing requires a nonblank description longer than the display name after trimming.",
+      "examples": ["Adds language server support for My Language."]
+    },
+    "repository": {
+      "type": "string",
+      "description": "URL of the extension's source repository. Publishing requires a valid URL with a host.",
+      "examples": ["https://github.com/example/my-language-server"]
+    },
+    "authors": {
+      "type": "array",
+      "description": "Extension authors. Names can include email addresses. Publishing requires at least one nonblank entry.",
+      "items": {
+        "type": "string",
+        "description": "An author name, optionally followed by an email address in angle brackets.",
+        "examples": ["Example Author <author@example.com>"]
+      }
+    },
+    "lib": {
+      "type": "object",
+      "description": "Metadata for the extension's WebAssembly library. Zed's builder normally populates this table.",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Library implementation kind. The builder sets this to Rust when Cargo.toml is present.",
+          "enum": ["Rust"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of the Zed extension API used by the library. The builder reads it from the compiled WebAssembly metadata.",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+          "examples": ["0.8.0"]
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "description": "Language directories relative to the extension root. The builder also adds direct children of languages/ that contain config.toml. These entries refer to directories.",
+      "items": {
+        "type": "string",
+        "description": "Path to a language directory containing config.toml.",
+        "examples": ["languages/my_language"]
+      }
+    },
+    "themes": {
+      "type": "array",
+      "description": "Theme JSON files relative to the extension root. The builder also adds JSON files directly under themes/.",
+      "items": {
+        "type": "string",
+        "description": "Path to a theme JSON file.",
+        "examples": ["themes/my-theme.json"]
+      }
+    },
+    "icon_themes": {
+      "type": "array",
+      "description": "Icon theme JSON files relative to the extension root. The builder also adds JSON files directly under icon_themes/.",
+      "items": {
+        "type": "string",
+        "description": "Path to an icon theme JSON file.",
+        "examples": ["icon_themes/my-icons.json"]
+      }
+    },
+    "snippets": {
+      "description": "One snippet JSON path or an array of snippet JSON paths, relative to the extension root. If omitted, the builder discovers snippets.json at the root when present.",
+      "oneOf": [
+        {
+          "title": "Single snippet file",
+          "type": "string",
+          "description": "Path to one snippet JSON file. A file named snippets.json provides global snippets.",
+          "examples": ["snippets.json"]
+        },
+        {
+          "title": "Multiple snippet files",
+          "type": "array",
+          "description": "Paths to snippet JSON files. Use lowercase language names for language-scoped file names.",
+          "items": {
+            "type": "string",
+            "description": "Path to a snippet JSON file.",
+            "examples": ["snippets/typescript.json"]
+          }
+        }
+      ]
+    },
+    "grammars": {
+      "type": "object",
+      "description": "Tree-sitter grammars by name. The builder requires snake_case names matching the grammar identifiers used by the language configurations.",
+      "additionalProperties": { "$ref": "#/definitions/grammar" }
+    },
+    "language_servers": {
+      "type": "object",
+      "description": "Language servers by ID. The table key supplies the server ID used by Zed settings and by the extension API.",
+      "additionalProperties": { "$ref": "#/definitions/languageServer" }
+    },
+    "context_servers": {
+      "type": "object",
+      "description": "MCP server registrations by ID. Each entry is an empty table. Zed is deprecating MCP server extensions in favor of the MCP Registry.",
+      "deprecated": true,
+      "deprecationMessage": "Zed is deprecating MCP server extensions. New extension submissions for MCP servers are closed.",
+      "additionalProperties": { "$ref": "#/definitions/contextServer" }
+    },
+    "slash_commands": {
+      "type": "object",
+      "description": "Legacy slash command declarations by command ID. Zed still parses these declarations. Slash command extensions have been deprecated.",
+      "deprecated": true,
+      "deprecationMessage": "Slash command extensions are deprecated. The Zed extension registry no longer accepts them.",
+      "additionalProperties": { "$ref": "#/definitions/slashCommand" }
+    },
+    "debug_adapters": {
+      "type": "object",
+      "description": "Debug Adapter Protocol registrations by adapter ID. Each adapter needs a JSON configuration schema for publishing.",
+      "additionalProperties": { "$ref": "#/definitions/debugAdapter" }
+    },
+    "debug_locators": {
+      "type": "object",
+      "description": "Debug locator registrations by ID. Each entry is an empty table. The extension implements the locator in code.",
+      "additionalProperties": { "$ref": "#/definitions/debugLocator" }
+    },
+    "language_model_providers": {
+      "type": "object",
+      "description": "Language model provider metadata by provider ID. Zed parses this map. The publishing CLI rejects manifests with a nonempty provider map.",
+      "additionalProperties": { "$ref": "#/definitions/languageModelProvider" }
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Declared extension capabilities. Write each entry as [[capabilities]] and select a kind to determine its fields. User settings can restrict the capabilities granted by the host.",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/processExec" },
+          { "$ref": "#/definitions/downloadFile" },
+          { "$ref": "#/definitions/npmInstall" }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "grammar": {
+      "title": "Tree-sitter grammar",
+      "type": "object",
+      "description": "Git source for a Tree-sitter grammar. Supply repository and exactly one of rev or commit.",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "oneOf": [
+        { "required": ["rev"] },
+        { "required": ["commit"] }
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Git repository containing the Tree-sitter parser.",
+          "examples": ["https://github.com/example/tree-sitter-my-language"]
+        },
+        "rev": {
+          "type": "string",
+          "description": "Git revision to check out for the grammar. Prefer a commit hash for reproducible builds."
+        },
+        "commit": {
+          "type": "string",
+          "description": "Legacy spelling of rev. Supply either rev or commit."
+        },
+        "path": {
+          "type": "string",
+          "description": "Subdirectory in the checked-out repository that contains src/parser.c. Defaults to the repository root.",
+          "examples": ["grammars/my_language"]
+        }
+      }
+    },
+    "languageServer": {
+      "title": "Language server",
+      "type": "object",
+      "description": "Associates the server ID from the table header with Zed languages and optional LSP overrides.",
+      "additionalProperties": false,
+      "properties": {
+        "languages": {
+          "type": "array",
+          "description": "Zed language display names supported by this server. Each name must match the language's configured name for the server to attach. An omitted or empty array allows the legacy language field to take effect.",
+          "items": {
+            "type": "string",
+            "description": "A Zed language name, with its configured capitalization.",
+            "examples": ["TypeScript", "TSX", "JavaScript", "JSX"]
+          }
+        },
+        "language": {
+          "type": "string",
+          "description": "Legacy single-language declaration, used when languages is empty or omitted.",
+          "deprecated": true,
+          "deprecationMessage": "Use languages with an array of Zed language names.",
+          "examples": ["TypeScript"]
+        },
+        "language_ids": {
+          "type": "object",
+          "description": "Overrides for the languageId sent to the LSP server. Keys are Zed language names and values are the corresponding protocol identifiers.",
+          "additionalProperties": {
+            "type": "string",
+            "description": "LSP languageId for the Zed language named by this key.",
+            "examples": ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+          },
+          "examples": [{ "TypeScript": "typescript", "TSX": "typescriptreact" }]
+        },
+        "code_action_kinds": {
+          "type": "array",
+          "description": "Override the code action kinds Zed associates with this adapter. Arbitrary server-specific kind strings are allowed. Omit this field for the built-in fallback list. An empty array explicitly overrides that list.",
+          "default": ["", "quickfix", "refactor", "refactor.extract", "source"],
+          "items": {
+            "type": "string",
+            "description": "An LSP CodeActionKind string. The empty string denotes the root kind.",
+            "examples": ["", "quickfix", "refactor", "refactor.extract", "refactor.inline", "refactor.rewrite", "source", "source.organizeImports", "source.fixAll"]
+          }
+        },
+        "opt_in_languages": {
+          "type": "array",
+          "description": "Covered Zed languages for which the user must explicitly list the server ID in their language_servers setting. The ... selector does not enable the server for these languages. The publishing CLI checks that each entry is covered by the server.",
+          "items": {
+            "type": "string",
+            "description": "A language supported by this server that requires explicit opt-in.",
+            "examples": ["TypeScript", "TSX"]
+          }
+        }
+      }
+    },
+    "contextServer": {
+      "title": "MCP server",
+      "type": "object",
+      "description": "Empty registration table. The extension supplies the MCP server command and any configuration through the extension API.",
+      "additionalProperties": false
+    },
+    "slashCommand": {
+      "title": "Legacy slash command",
+      "type": "object",
+      "description": "Legacy slash command declaration. Both properties are required if this table is present.",
+      "additionalProperties": false,
+      "required": ["description", "requires_argument"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "User-facing description of the slash command."
+        },
+        "requires_argument": {
+          "type": "boolean",
+          "description": "Whether the slash command requires an argument."
+        }
+      }
+    },
+    "debugAdapter": {
+      "title": "Debug adapter",
+      "type": "object",
+      "description": "A Debug Adapter Protocol registration. The table key supplies the adapter ID.",
+      "additionalProperties": false,
+      "properties": {
+        "schema_path": {
+          "type": "string",
+          "description": "Path to the adapter's configuration JSON schema relative to the extension root. Defaults to debug_adapter_schemas/<adapter-id>.json.",
+          "examples": ["debug_adapter_schemas/my-adapter.json"]
+        }
+      }
+    },
+    "debugLocator": {
+      "title": "Debug locator",
+      "type": "object",
+      "description": "Empty registration table. The table key identifies the debug locator implemented by the extension.",
+      "additionalProperties": false
+    },
+    "languageModelProvider": {
+      "title": "Language model provider",
+      "type": "object",
+      "description": "Provider metadata. The pinned publishing CLI rejects nonempty language model provider declarations.",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name of the language model provider."
+        },
+        "icon": {
+          "type": "string",
+          "description": "Path to an SVG icon relative to the extension root.",
+          "examples": ["icons/provider.svg"]
+        }
+      }
+    },
+    "processExec": {
+      "title": "Execute a process",
+      "type": "object",
+      "description": "Allows matching process executions when the user's granted capabilities permit them as well.",
+      "additionalProperties": false,
+      "required": ["kind", "command", "args"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["process:exec"],
+          "description": "Run an external command through the extension API."
+        },
+        "command": {
+          "type": "string",
+          "description": "Exact command string. Use * to match any command.",
+          "examples": ["node"]
+        },
+        "args": {
+          "type": "array",
+          "description": "Argument pattern. Use [] for a command with no arguments. A * element matches one argument. A ** element matches all remaining arguments, including zero.",
+          "items": {
+            "type": "string",
+            "description": "A literal argument or a whole-element wildcard."
+          },
+          "examples": [[], ["--version"], ["run", "*", "**"]]
+        }
+      }
+    },
+    "downloadFile": {
+      "title": "Download a file",
+      "type": "object",
+      "description": "Declares a download capability. The pinned host enforces download permissions through the user's granted capabilities.",
+      "additionalProperties": false,
+      "required": ["kind", "host", "path"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["download_file"],
+          "description": "Download a file through the extension API."
+        },
+        "host": {
+          "type": "string",
+          "description": "URL hostname. Match the full hostname or use * for any hostname.",
+          "examples": ["github.com"]
+        },
+        "path": {
+          "type": "array",
+          "description": "URL path pattern as separate segments. A * element matches one segment. A ** element matches all remaining segments, including zero.",
+          "items": {
+            "type": "string",
+            "description": "A literal URL path segment or a whole-element wildcard."
+          },
+          "examples": [["example", "my-server", "releases", "**"]]
+        }
+      }
+    },
+    "npmInstall": {
+      "title": "Install an npm package",
+      "type": "object",
+      "description": "Declares an npm install capability. The pinned host enforces npm install permissions through the user's granted capabilities.",
+      "additionalProperties": false,
+      "required": ["kind", "package"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["npm:install"],
+          "description": "Install an npm package through the extension API."
+        },
+        "package": {
+          "type": "string",
+          "description": "Exact npm package name, including the scope when applicable. Use * to match any package.",
+          "examples": ["@example/my-language-server"]
+        }
+      }
+    }
+  }
+}
