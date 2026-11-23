@@ -6,6 +6,11 @@ schema_version = 1
 authors = ["Muhammad Azka Naufal <215347290+mhmdazkanfl@users.noreply.github.com>"]
 repository = "https://github.com/mhmdazkanfl/ts-lsp"
 
+# The project lookup runs the Node executable supplied by Zed at a machine-specific path.
+[[capabilities]]
+kind = "process:exec"
+command = "*"
+args = ["--no-global-search-paths", "--eval", "*", "--", "*", "*", "*", "*"]
 
 [language_servers.ts-lsp]
 name = "TypeScript Language Server"
