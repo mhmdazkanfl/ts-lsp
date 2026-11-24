@@ -1,6 +1,6 @@
 [package]
-name = "ts-lsp"
-version = "1.1.0"
+name = "zed-tsgo"
+version = "0.0.1"
 edition = "2024"
 
 [lib]
@@ -8,5 +8,4 @@ path = "src/ts.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-semver = "1"
 zed_extension_api = "0.7.0"
