@@ -18,6 +18,7 @@ TBA
 ```sh
 rustup target add wasm32-wasip2
 cargo fmt --all -- --check
+cargo test --locked
 cargo clippy --locked --target wasm32-wasip2 -- -D warnings
 cargo build --locked --release --target wasm32-wasip2
 ```
