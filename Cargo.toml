@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2024"
 
 [lib]
-path = "src/ts.rs"
+path = "src/tsgo.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
