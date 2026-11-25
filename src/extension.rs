@@ -34,4 +34,14 @@ impl z::Extension for TsgoLs {
                 .collect(),
         })
     }
+
+    fn language_server_initialization_options(
+        &mut self,
+        _language_server_id: &z::LanguageServerId,
+        _worktree: &z::Worktree,
+    ) -> z::Result<Option<z::serde_json::Value>> {
+        Ok(Some(z::serde_json::json!({
+            "codeLensShowLocationsCommandName": "editor.action.showReferences",
+        })))
+    }
 }
