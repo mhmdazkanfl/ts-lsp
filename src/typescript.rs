@@ -1,4 +1,3 @@
-mod cache;
 mod package;
 mod update;
 
@@ -13,43 +12,18 @@ pub fn ensure_installed(
     report: impl FnMut(z::LanguageServerInstallationStatus),
 ) -> z::Result<std::path::PathBuf> {
     let package = package::PlatformPackage::new(std::path::Path::new(""), os, arch)?;
-    let cache = cache::UpdateCache::new(std::path::Path::new(""));
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    ensure_package(
-        &package,
-        &cache,
-        &package::ZedNpm,
-        now,
-        report,
-    )?;
+    ensure_package(&package, &package::ZedNpm, report)?;
     Ok(package.into_binary())
 }
 
 fn ensure_package(
     package: &package::PlatformPackage,
-    cache: &cache::UpdateCache,
     npm: &impl package::Npm,
-    now: u64,
     mut report: impl FnMut(z::LanguageServerInstallationStatus),
 ) -> z::Result<()> {
     let installed = package
         .installed_version()
         .filter(update::is_supported);
-    if !update::check_due(
-        now,
-        cache.last_check(),
-        installed.is_some(),
-    ) {
-        return Ok(());
-    }
-
-    if let Err(err) = cache.record_check(now) {
-        eprintln!("Failed to record the TypeScript update check: {err}");
-    }
     report(z::LanguageServerInstallationStatus::CheckingForUpdate);
 
     let attempt = (|| {

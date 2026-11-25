@@ -1,7 +1,6 @@
 use zed_extension_api as z;
 
 const PACKAGE_NAME: &str = "@typescript/typescript-win32-x64";
-const NOW: u64 = 1_000_000;
 
 enum InstallOutcome {
     Complete,
@@ -47,14 +46,12 @@ impl super::package::Npm for FakeNpm<'_> {
 
 struct Fixture {
     work_dir: tempfile::TempDir,
-    cache: super::cache::UpdateCache,
     package: super::package::PlatformPackage,
 }
 
 impl Fixture {
     fn new() -> Self {
         let work_dir = tempfile::tempdir().unwrap();
-        let cache = super::cache::UpdateCache::new(work_dir.path());
         let package = super::package::PlatformPackage::new(
             work_dir.path(),
             z::Os::Windows,
@@ -63,7 +60,6 @@ impl Fixture {
         .unwrap();
         Self {
             work_dir,
-            cache,
             package,
         }
     }
@@ -73,32 +69,20 @@ impl Fixture {
             work_dir: self.work_dir.path(),
             latest,
             outcome,
-            checks: Default::default(),
-            versions_requested: Default::default(),
+            checks: std::cell::Cell::default(),
+            versions_requested: std::cell::RefCell::default(),
         }
     }
 
     fn start(&self, npm: &FakeNpm<'_>) -> z::Result<()> {
-        super::ensure_package(
-            &self.package,
-            &self.cache,
-            npm,
-            NOW,
-            |_| {},
-        )
+        super::ensure_package(&self.package, npm, |_| {})
     }
 
     fn assert_start_fails(&self, npm: &FakeNpm<'_>) {
         let mut last_status = None;
-        let result = super::ensure_package(
-            &self.package,
-            &self.cache,
-            npm,
-            NOW,
-            |status| {
-                last_status = Some(status);
-            },
-        );
+        let result = super::ensure_package(&self.package, npm, |status| {
+            last_status = Some(status);
+        });
         assert!(result.is_err());
         assert!(matches!(
             last_status,
@@ -136,7 +120,7 @@ fn write_install(work_dir: &std::path::Path, version: &str, has_binary: bool) {
 }
 
 #[test]
-fn cold_start_installs_the_exact_version_and_warm_start_skips_npm() {
+fn cold_start_installs_the_exact_version() {
     let fixture = Fixture::new();
     let npm = fixture.npm(Ok("7.0.2"), InstallOutcome::Complete);
     fixture.start(&npm).unwrap();
@@ -144,20 +128,33 @@ fn cold_start_installs_the_exact_version_and_warm_start_skips_npm() {
         *npm.versions_requested.borrow(),
         ["7.0.2"]
     );
-    let reopened_cache = super::cache::UpdateCache::new(fixture.work_dir.path());
+}
+
+#[test]
+fn each_start_checks_npm_and_reuses_the_current_version() {
+    let fixture = Fixture::new();
+    write_install(fixture.work_dir.path(), "7.0.2", true);
+    let npm = fixture.npm(Ok("7.0.2"), InstallOutcome::Fail);
+    fixture.start(&npm).unwrap();
+    fixture.start(&npm).unwrap();
+    assert_eq!(npm.checks.get(), 2);
+    assert!(
+        npm.versions_requested
+            .borrow()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_failed_version_lookup_reuses_the_installed_binary() {
+    let fixture = Fixture::new();
+    write_install(fixture.work_dir.path(), "7.0.2", true);
     let npm = fixture.npm(
         Err("offline".into()),
         InstallOutcome::Fail,
     );
-    super::ensure_package(
-        &fixture.package,
-        &reopened_cache,
-        &npm,
-        NOW,
-        |_| {},
-    )
-    .unwrap();
-    assert_eq!(npm.checks.get(), 0);
+    fixture.start(&npm).unwrap();
+    assert_eq!(npm.checks.get(), 1);
     assert!(
         npm.versions_requested
             .borrow()
