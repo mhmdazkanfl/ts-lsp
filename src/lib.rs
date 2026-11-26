@@ -1,3 +1,4 @@
+mod configuration;
 mod extension;
 mod labels;
 mod typescript;

@@ -50,9 +50,13 @@ impl z::Extension for TsgoLs {
         language_server_id: &z::LanguageServerId,
         worktree: &z::Worktree,
     ) -> z::Result<Option<z::serde_json::Value>> {
-        let lsp_settings =
-            z::settings::LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
-        Ok(lsp_settings.settings)
+        let settings =
+            z::settings::LspSettings::for_worktree(language_server_id.as_ref(), worktree)?.settings;
+        let tab_size = z::settings::LanguageSettings::for_worktree(None, worktree)
+            .ok()
+            .map(|settings| settings.tab_size.get());
+
+        Ok(crate::configuration::with_editor_defaults(settings, tab_size))
     }
 
     fn label_for_completion(
