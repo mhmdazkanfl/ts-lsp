@@ -131,6 +131,23 @@ fn cold_start_installs_the_exact_version() {
 }
 
 #[test]
+fn cold_start_rejects_an_unsupported_release_without_downloading_it() {
+    let fixture = Fixture::new();
+    let npm = fixture.npm(
+        Ok("7.0.0-rc.1"),
+        InstallOutcome::Complete,
+    );
+
+    fixture.assert_start_fails(&npm);
+
+    assert!(
+        npm.versions_requested
+            .borrow()
+            .is_empty()
+    );
+}
+
+#[test]
 fn each_start_checks_npm_and_reuses_the_current_version() {
     let fixture = Fixture::new();
     write_install(fixture.work_dir.path(), "7.0.2", true);
@@ -160,6 +177,22 @@ fn a_failed_version_lookup_reuses_the_installed_binary() {
             .borrow()
             .is_empty()
     );
+}
+
+#[test]
+fn a_failed_version_lookup_does_not_reuse_an_unsupported_cached_binary() {
+    let fixture = Fixture::new();
+    write_install(
+        fixture.work_dir.path(),
+        "7.0.0-rc.1",
+        true,
+    );
+    let npm = fixture.npm(
+        Err("offline".into()),
+        InstallOutcome::Fail,
+    );
+
+    fixture.assert_start_fails(&npm);
 }
 
 #[test]
