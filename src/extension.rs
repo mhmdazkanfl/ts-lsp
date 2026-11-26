@@ -44,4 +44,14 @@ impl z::Extension for TsgoLs {
             "codeLensShowLocationsCommandName": "editor.action.showReferences",
         })))
     }
+
+    fn language_server_workspace_configuration(
+        &mut self,
+        language_server_id: &z::LanguageServerId,
+        worktree: &z::Worktree,
+    ) -> z::Result<Option<z::serde_json::Value>> {
+        let lsp_settings =
+            z::settings::LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
+        Ok(lsp_settings.settings)
+    }
 }
