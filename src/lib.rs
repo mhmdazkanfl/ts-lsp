@@ -1,4 +1,5 @@
 mod extension;
+mod labels;
 mod typescript;
 
 use zed_extension_api as z;

@@ -54,4 +54,20 @@ impl z::Extension for TsgoLs {
             z::settings::LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
         Ok(lsp_settings.settings)
     }
+
+    fn label_for_completion(
+        &self,
+        _language_server_id: &z::LanguageServerId,
+        completion: z::lsp::Completion,
+    ) -> Option<z::CodeLabel> {
+        crate::labels::completion(completion)
+    }
+
+    fn label_for_symbol(
+        &self,
+        _language_server_id: &z::LanguageServerId,
+        symbol: z::lsp::Symbol,
+    ) -> Option<z::CodeLabel> {
+        crate::labels::symbol(symbol)
+    }
 }
