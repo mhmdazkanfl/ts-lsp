@@ -56,7 +56,9 @@ impl z::Extension for TsgoLs {
             .ok()
             .map(|settings| settings.tab_size.get());
 
-        Ok(crate::configuration::with_editor_defaults(settings, tab_size))
+        Ok(Some(
+            crate::configuration::with_editor_defaults(settings, tab_size),
+        ))
     }
 
     fn label_for_completion(
