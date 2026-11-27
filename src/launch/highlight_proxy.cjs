@@ -5,12 +5,7 @@ const { pipeline } = require("node:stream/promises");
 
 const headerTerminator = "\r\n\r\n";
 
-function encode(message) {
-    const body = Buffer.from(JSON.stringify(message));
-    const header = Buffer.from(`Content-Length: ${body.length}${headerTerminator}`);
-    return Buffer.concat([header, body]);
-}
-
+// Keep the original URI if decoding would change path boundaries or fail to preserve the path.
 function normalizeFileUri(uri) {
     const match = /^file:\/\/([^/?#]*)(\/[^?#]*)$/.exec(uri);
     if (!match) {
@@ -23,15 +18,16 @@ function normalizeFileUri(uri) {
             || (process.platform === "win32" && segment.includes("\\")))) {
             return uri;
         }
-        if (authority === "" && /^[a-z]:/i.test(segments[1])) {
-            segments[1] = segments[1][0].toLowerCase() + segments[1].slice(1);
-        }
-        if (authority === "" && segments[1] === "" && segments[2]) {
-            if (!segments[3] || !/^[a-z0-9._-]+$/i.test(segments[2])) {
-                return uri;
+        if (authority === "") {
+            if (/^[a-z]:/i.test(segments[1])) {
+                segments[1] = segments[1][0].toLowerCase() + segments[1].slice(1);
+            } else if (segments[1] === "" && segments[2]) {
+                if (!segments[3] || !/^[a-z0-9._-]+$/i.test(segments[2])) {
+                    return uri;
+                }
+                // TypeScript spells UNC paths as file://server/share.
+                segments.splice(0, 2);
             }
-            // TypeScript emits UNC paths as file://server/share, even if given file:////server/share.
-            segments.splice(0, 2);
         }
         // TypeScript escapes all characters outside the URI unreserved set in each path segment.
         const escaped = segments.map((segment) => encodeURIComponent(segment).replace(
@@ -57,15 +53,23 @@ function normalizeHighlightRequest(message) {
     }
 }
 
-async function* rewriteRequests(input) {
-    let header = Buffer.alloc(0);
-    let remaining;
+function encodeFrame(message) {
+    const body = Buffer.from(JSON.stringify(message));
+    const header = Buffer.from(`Content-Length: ${body.length}${headerTerminator}`);
+    return Buffer.concat([header, body]);
+}
+
+// LSP counts bytes. Keep the original header and body so unchanged frames can pass through.
+async function* readFrames(input) {
+    const empty = Buffer.alloc(0);
+    let header = empty;
+    let remaining = 0;
     let bodyParts = [];
 
     for await (const chunk of input) {
         let offset = 0;
         while (offset < chunk.length) {
-            if (remaining === undefined) {
+            if (remaining === 0) {
                 const next = chunk.subarray(offset);
                 const data = header.length === 0 ? next : Buffer.concat([header, next]);
                 const end = data.indexOf(headerTerminator);
@@ -93,17 +97,22 @@ async function* rewriteRequests(input) {
             }
 
             const body = bodyParts.length === 1 ? bodyParts[0] : Buffer.concat(bodyParts);
-            const message = JSON.parse(body.toString("utf8"));
-            const replacement = normalizeHighlightRequest(message);
-            yield replacement === undefined ? Buffer.concat([header, body]) : encode(replacement);
-            header = Buffer.alloc(0);
-            remaining = undefined;
+            yield { header, body };
+            header = empty;
             bodyParts = [];
         }
     }
 
     if (header.length > 0) {
         throw new Error("Incomplete LSP message");
+    }
+}
+
+async function* rewriteRequests(input) {
+    for await (const { header, body } of readFrames(input)) {
+        const message = JSON.parse(body.toString("utf8"));
+        const replacement = normalizeHighlightRequest(message);
+        yield replacement === undefined ? Buffer.concat([header, body]) : encodeFrame(replacement);
     }
 }
 
@@ -136,6 +145,7 @@ function run(binary, args) {
     });
     pipeline(process.stdin, rewriteRequests, server.stdin).catch(
         (error) => {
+            // The child can close its input as part of a normal shutdown.
             if (!exited) {
                 fail(error);
             }
