@@ -25,14 +25,17 @@ impl z::Extension for TsgoLs {
                 (binary.arguments, binary.env)
             });
 
-        Ok(z::Command {
+        let command = z::Command {
             command: binary.to_string_lossy().into_owned(),
             args: arguments.unwrap_or_else(|| vec!["--lsp".into(), "--stdio".into()]),
             env: env
                 .unwrap_or_default()
                 .into_iter()
                 .collect(),
-        })
+        };
+        Ok(crate::highlights::with_workaround(
+            command,
+        ))
     }
 
     fn language_server_initialization_options(
