@@ -102,7 +102,28 @@ mod tests {
     }
 
     #[test]
+    fn the_completion_filter_covers_the_entire_unicode_name() {
+        let completion = z::lsp::Completion {
+            label: "café".into(),
+            label_details: None,
+            detail: Some("() => number".into()),
+            kind: Some(z::lsp::CompletionKind::Function),
+            insert_text_format: None,
+        };
+
+        let label = super::completion(completion).unwrap();
+
+        assert_label(
+            &label,
+            "café () => number",
+            "café",
+            "function",
+        );
+    }
+
+    #[test]
     fn completion_keeps_the_signature_and_import_source_outside_the_filter_range() {
+        // The Zed SDK does not re-export the type of Completion::label_details.
         let label = super::completion_label(
             "café".into(),
             "function",
@@ -121,14 +142,15 @@ mod tests {
 
     #[test]
     fn completion_uses_resolved_detail_when_available() {
-        let label = super::completion(z::lsp::Completion {
+        let completion = z::lsp::Completion {
             label: "size".into(),
             label_details: None,
             detail: Some("number".into()),
             kind: Some(z::lsp::CompletionKind::Property),
             insert_text_format: None,
-        })
-        .unwrap();
+        };
+
+        let label = super::completion(completion).unwrap();
 
         assert_label(
             &label,
@@ -140,23 +162,25 @@ mod tests {
 
     #[test]
     fn workspace_symbol_highlights_the_interface_name() {
-        let label = super::symbol(z::lsp::Symbol {
+        let symbol = z::lsp::Symbol {
             name: "Menu".into(),
             kind: z::lsp::SymbolKind::Interface,
-        })
-        .unwrap();
+        };
+
+        let label = super::symbol(symbol).unwrap();
 
         assert_label(&label, "Menu", "Menu", "type");
     }
 
     #[test]
     fn workspace_file_symbol_leaves_the_label_to_zed() {
-        assert!(
-            super::symbol(z::lsp::Symbol {
-                name: "menu.ts".into(),
-                kind: z::lsp::SymbolKind::File,
-            })
-            .is_none()
-        );
+        let symbol = z::lsp::Symbol {
+            name: "menu.ts".into(),
+            kind: z::lsp::SymbolKind::File,
+        };
+
+        let label = super::symbol(symbol);
+
+        assert!(label.is_none());
     }
 }

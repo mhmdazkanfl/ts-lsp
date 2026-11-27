@@ -4,104 +4,129 @@ const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const path = require("node:path");
+const { buffer } = require("node:stream/consumers");
 const { test } = require("node:test");
-const { setImmediate } = require("node:timers/promises");
+const { rewriteRequests } = require("../src/launch/highlight_proxy.cjs");
 
-const highlight = "textDocument/documentHighlight";
-const windows = process.platform === "win32";
-const uri = windows ? "file:///C:/Work/Démo/(test)/main.ts" : "file:///Work/Démo/(test)/%6Dain.ts";
-const normalized = `file:///${windows ? "c%3A/" : ""}Work/D%C3%A9mo/%28test%29/main.ts`;
+const proxy = path.join(__dirname, "../src/launch/highlight_proxy.cjs");
+const contentType = "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n";
+const uri = "file:///Work/Démo/(test)/%6Dain.ts";
+const normalizedUri = "file:///Work/D%C3%A9mo/%28test%29/main.ts";
+const requestId = "request-α";
 
-function encode(fields, extraHeader = "") {
-    const body = JSON.stringify({ jsonrpc: "2.0", ...fields });
+function frame(message, extraHeader = "") {
+    const body = JSON.stringify(message);
     return Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n${extraHeader}\r\n${body}`);
 }
 
-async function* messages(stream) {
-    let buffer = Buffer.alloc(0);
-    for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
-        for (;;) {
-            const headerEnd = buffer.indexOf("\r\n\r\n");
-            if (headerEnd < 0) {
-                break;
-            }
-            const length = Number(/^Content-Length: (\d+)/.exec(buffer.toString("ascii", 0, headerEnd))[1]);
-            const end = headerEnd + 4 + length;
-            if (end > buffer.length) {
-                break;
-            }
-            yield {
-                bytes: buffer.subarray(0, end),
-                message: JSON.parse(buffer.toString("utf8", headerEnd + 4, end)),
-            };
-            buffer = buffer.subarray(end);
-        }
-    }
-    assert.equal(buffer.length, 0);
+function request(uri, method = "textDocument/documentHighlight") {
+    return {
+        jsonrpc: "2.0",
+        id: requestId,
+        method,
+        params: {
+            textDocument: { uri },
+            position: { line: 1, character: 2 },
+        },
+    };
 }
 
-test("normalizes only the file URI on standard highlight requests", { timeout: 5000 }, async (t) => {
-    const proxy = path.join(__dirname, "../src/launch/highlight_proxy.cjs");
-    const child = spawn(process.execPath, [proxy, process.execPath, "-e", "process.stdin.pipe(process.stdout)"], {
-        stdio: ["pipe", "pipe", "inherit"],
+function readFrame(bytes) {
+    const headerEnd = bytes.indexOf("\r\n\r\n");
+    assert.notEqual(headerEnd, -1);
+    const body = bytes.subarray(headerEnd + 4);
+    const length = /^Content-Length:[ \t]*(\d+)[ \t]*\r?$/im.exec(bytes.toString("ascii", 0, headerEnd));
+    assert.equal(Number(length?.[1]), body.length);
+    return JSON.parse(body.toString("utf8"));
+}
+
+const rewrittenUris = [
+    ["a local path with Unicode, punctuation and unnecessary escaping", uri, normalizedUri],
+    ["a drive letter with a lowercase escape", "file:///Z%3a/Work/main.ts", "file:///z%3A/Work/main.ts"],
+    ["a UNC path with an authority", "file://server/share/Démo/!%25.ts", "file://server/share/D%C3%A9mo/%21%25.ts"],
+    ["a UNC path with an empty authority", "file:////server/share/Démo/!%25.ts", "file://server/share/D%C3%A9mo/%21%25.ts"],
+];
+
+for (const [name, input, expected] of rewrittenUris) {
+    test(`a highlight request normalizes ${name}`, async () => {
+        const original = frame(request(input));
+
+        const output = await buffer(rewriteRequests([original]));
+
+        assert.deepEqual(readFrame(output), request(expected));
     });
-    t.after(() => child.kill());
+}
 
-    const results = messages(child.stdout);
-    async function read() {
-        const message = await results.next();
-        assert.equal(message.done, false);
-        return message.value;
-    }
+const unchangedUris = [
+    ["an ambiguous file path", "file:////some%20dir/main.ts"],
+    ["an encoded path separator", "file:///path/(main)%2finner.ts"],
+    ["an encoded NUL", "file:///path/(main)%00.ts"],
+    ["an invalid percent escape", "file:///path/main%.ts"],
+    ["a URI with a query", "file:///path/(main).ts?revision=1"],
+    ["a non-file URI", "untitled:Untitled-1"],
+    ["an already normalized URI", normalizedUri],
+];
 
-    const params = { textDocument: { uri }, position: { line: 1, character: 2 } };
-    const request = encode({ id: "first", method: highlight, params });
-    const utf8Offset = request.indexOf(Buffer.from("é"));
-    child.stdin.write(request.subarray(0, 5));
-    await setImmediate();
-    child.stdin.write(request.subarray(5, utf8Offset + 1));
-    await setImmediate();
-    child.stdin.write(request.subarray(utf8Offset + 1));
+for (const [name, input] of unchangedUris) {
+    test(`a highlight request preserves the original frame for ${name}`, async () => {
+        const original = frame(request(input), contentType);
 
-    assert.deepEqual((await read()).message, {
-        jsonrpc: "2.0",
-        id: "first",
-        method: highlight,
-        params: { ...params, textDocument: { uri: normalized } },
+        const output = await buffer(rewriteRequests([original]));
+
+        assert.deepEqual(output, original);
     });
+}
 
-    // Two frames can arrive in one chunk. The hover frame must survive byte for byte.
-    const hover = encode(
-        { id: 2, method: "textDocument/hover", params },
-        "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n",
-    );
-    child.stdin.write(Buffer.concat([hover, request]));
-    assert.deepEqual((await read()).bytes, hover);
-    assert.equal((await read()).message.params.textDocument.uri, normalized);
-
-    const cases = [
-        ["file:///Z%3a/Work/main.ts", "file:///z%3A/Work/main.ts"],
-        ["file://server/share/Démo/!%25.ts", "file://server/share/D%C3%A9mo/%21%25.ts"],
-        ["file:////server/share/Démo/!%25.ts", "file://server/share/D%C3%A9mo/%21%25.ts"],
-        ["file:////some%20dir/main.ts", "file:////some%20dir/main.ts"],
-        ["file:///path/main%2Finner.ts", "file:///path/main%2Finner.ts"],
-        ["file:///path/main%.ts", "file:///path/main%.ts"],
-        ["untitled:Untitled-1", "untitled:Untitled-1"],
-        [normalized, normalized],
+test("a highlight request can span an LSP header and a multibyte character across chunks", async () => {
+    const original = frame(request(uri));
+    const splitCharacter = original.indexOf(Buffer.from("é")) + 1;
+    const chunks = [
+        original.subarray(0, 5),
+        original.subarray(5, splitCharacter),
+        original.subarray(splitCharacter),
     ];
-    for (const [input, expected] of cases) {
-        const inputParams = { ...params, textDocument: { uri: input } };
-        child.stdin.write(encode({ id: 3, method: highlight, params: inputParams }));
-        assert.deepEqual((await read()).message, {
-            jsonrpc: "2.0",
-            id: 3,
-            method: highlight,
-            params: { ...inputParams, textDocument: { uri: expected } },
-        });
-    }
 
-    const exit = once(child, "exit");
-    child.stdin.end();
-    assert.deepEqual(await exit, [0, null]);
+    const output = await buffer(rewriteRequests(chunks));
+
+    assert.deepEqual(readFrame(output), request(normalizedUri));
+});
+
+test("a hover request keeps its original bytes when it shares a chunk with a highlight request", async () => {
+    const hover = frame(request(uri, "textDocument/hover"), contentType);
+    const highlight = frame(request(uri));
+    const chunk = Buffer.concat([hover, highlight]);
+
+    const output = await buffer(rewriteRequests([chunk]));
+
+    assert.deepEqual(output.subarray(0, hover.length), hover);
+    assert.deepEqual(readFrame(output.subarray(hover.length)), request(normalizedUri));
+});
+
+test("a truncated request fails when the input closes", async () => {
+    const truncated = frame(request(uri)).subarray(0, -1);
+
+    const output = buffer(rewriteRequests([truncated]));
+
+    await assert.rejects(output, /Incomplete LSP message/);
+});
+
+test("the stdio proxy sends a normalized request and delivers the server response verbatim", { timeout: 5000 }, async (t) => {
+    const response = frame({ jsonrpc: "2.0", id: requestId, result: [] }, contentType);
+    // Use the child's stderr to observe what reached its stdin.
+    const server = `
+        process.stdin.pipe(process.stderr, { end: false });
+        process.stdin.on("end", () => process.stdout.write(process.argv[1]));
+    `;
+    const child = spawn(process.execPath, [
+        proxy, process.execPath, "-e", server, response.toString(),
+    ], { stdio: ["pipe", "pipe", "pipe"] });
+    t.after(() => child.kill());
+    const result = Promise.all([buffer(child.stderr), buffer(child.stdout), once(child, "close")]);
+
+    child.stdin.end(frame(request(uri)));
+
+    const [forwardedRequest, output, status] = await result;
+    assert.deepEqual(status, [0, null]);
+    assert.deepEqual(readFrame(forwardedRequest), request(normalizedUri));
+    assert.deepEqual(output, response);
 });

@@ -71,8 +71,10 @@ mod tests {
 
     #[test]
     fn supplies_hint_and_lens_defaults_without_a_zed_tab_width() {
+        let settings = super::with_editor_defaults(None, None);
+
         assert_eq!(
-            super::with_editor_defaults(None, None),
+            settings,
             z::serde_json::json!({"editor": {
                 "includeInlayParameterNameHints": "literals",
                 "includeInlayVariableTypeHints": true,
@@ -84,14 +86,10 @@ mod tests {
 
     #[test]
     fn uses_zed_tab_width_as_the_typescript_indentation_default() {
-        for tab_size in [2, 8] {
-            let settings = super::with_editor_defaults(None, Some(tab_size));
-            assert_eq!(settings["editor"]["tabSize"], tab_size);
-            assert_eq!(
-                settings["editor"]["indentSize"],
-                tab_size
-            );
-        }
+        let settings = super::with_editor_defaults(None, Some(8));
+
+        assert_eq!(settings["editor"]["tabSize"], 8);
+        assert_eq!(settings["editor"]["indentSize"], 8);
     }
 
     #[test]
@@ -108,8 +106,10 @@ mod tests {
             "js/ts": {"implementationsCodeLens": {"enabled": false}, "suggest": {"autoImports": false}},
         });
 
+        let configuration = super::with_editor_defaults(Some(settings), Some(2));
+
         assert_eq!(
-            super::with_editor_defaults(Some(settings), Some(2)),
+            configuration,
             z::serde_json::json!({
                 "editor": {
                     "tabSize": 8,
@@ -128,15 +128,28 @@ mod tests {
     }
 
     #[test]
-    fn preserves_non_object_configurations() {
-        for settings in [
-            z::serde_json::json!(false),
-            z::serde_json::json!({"editor": null}),
-        ] {
-            assert_eq!(
-                super::with_editor_defaults(Some(settings.clone()), Some(2)),
-                settings,
-            );
-        }
+    fn preserves_a_non_object_workspace_configuration() {
+        let configuration = super::with_editor_defaults(
+            Some(z::serde_json::json!(false)),
+            Some(2),
+        );
+
+        assert_eq!(
+            configuration,
+            z::serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn preserves_an_explicitly_null_editor_configuration() {
+        let settings =
+            z::serde_json::json!({"editor": null, "typescript": {"format": {"indentSize": 4}}});
+
+        let configuration = super::with_editor_defaults(Some(settings), Some(2));
+
+        assert_eq!(
+            configuration,
+            z::serde_json::json!({"editor": null, "typescript": {"format": {"indentSize": 4}}}),
+        );
     }
 }

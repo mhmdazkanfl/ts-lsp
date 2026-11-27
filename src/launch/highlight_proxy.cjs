@@ -154,5 +154,9 @@ function run(binary, args) {
     pipeline(server.stdout, process.stdout).catch(fail);
 }
 
-const [binary, ...args] = process.argv.slice(2);
-run(binary, args);
+module.exports = { rewriteRequests };
+
+if (require.main === module) {
+    const [binary, ...args] = process.argv.slice(2);
+    run(binary, args);
+}

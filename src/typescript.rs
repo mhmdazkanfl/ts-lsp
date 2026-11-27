@@ -162,8 +162,10 @@ fn is_supported(version: &semver::Version) -> bool {
 #[cfg(test)]
 mod tests {
     use zed_extension_api as z;
+    use zed_extension_api::LanguageServerInstallationStatus as Status;
 
     const PACKAGE_NAME: &str = "@typescript/typescript-win32-x64";
+    const EXECUTABLE: &str = "tsc.exe";
 
     enum InstallOutcome {
         Complete,
@@ -173,32 +175,39 @@ mod tests {
         FailAfterRemovingBinary,
     }
 
-    struct FakeNpm<'a> {
-        work_dir: &'a std::path::Path,
+    struct Registry {
+        work_dir: std::path::PathBuf,
         latest: z::Result<&'static str>,
         outcome: InstallOutcome,
-        checks: usize,
-        versions_requested: Vec<String>,
+        installs: Vec<(String, String)>,
     }
 
-    impl super::Npm for FakeNpm<'_> {
-        fn latest_version(&mut self, name: &str) -> z::Result<String> {
-            assert_eq!(name, PACKAGE_NAME);
-            self.checks += 1;
+    impl super::Npm for Registry {
+        fn latest_version(&mut self, _name: &str) -> z::Result<String> {
             self.latest.clone().map(str::to_owned)
         }
 
         fn install(&mut self, name: &str, version: &str) -> z::Result<()> {
-            assert_eq!(name, PACKAGE_NAME);
-            self.versions_requested
-                .push(version.to_owned());
+            self.installs
+                .push((name.to_owned(), version.to_owned()));
             match self.outcome {
-                InstallOutcome::Complete => write_install(self.work_dir, version, true),
-                InstallOutcome::MissingBinary => write_install(self.work_dir, version, false),
-                InstallOutcome::WrongVersion => write_install(self.work_dir, "7.0.1", true),
+                InstallOutcome::Complete => {
+                    write_manifest(&self.work_dir, name, version);
+                    write_binary(&self.work_dir, name, EXECUTABLE);
+                }
+                InstallOutcome::MissingBinary => write_manifest(&self.work_dir, name, version),
+                InstallOutcome::WrongVersion => {
+                    write_manifest(&self.work_dir, name, "7.0.1");
+                    write_binary(&self.work_dir, name, EXECUTABLE);
+                }
                 InstallOutcome::Fail => return Err("npm failed".into()),
                 InstallOutcome::FailAfterRemovingBinary => {
-                    std::fs::remove_file(binary_path(self.work_dir)).unwrap();
+                    std::fs::remove_file(binary_path(
+                        &self.work_dir,
+                        name,
+                        EXECUTABLE,
+                    ))
+                    .unwrap();
                     return Err("npm failed".into());
                 }
             }
@@ -206,299 +215,363 @@ mod tests {
         }
     }
 
-    struct Fixture {
-        work_dir: tempfile::TempDir,
-        package: super::NativePackage,
+    struct StartFixture {
+        sut: super::NativePackage,
+        registry: Registry,
+        statuses: Vec<Status>,
+        directory: tempfile::TempDir,
     }
 
-    impl Fixture {
-        fn new() -> Self {
-            let work_dir = tempfile::tempdir().unwrap();
-            let package = super::NativePackage::new(
-                work_dir.path(),
+    impl StartFixture {
+        fn new(latest: z::Result<&'static str>, outcome: InstallOutcome) -> Self {
+            Self::for_platform(
                 z::Os::Windows,
                 z::Architecture::X8664,
-            )
-            .unwrap();
-            Self {
-                work_dir,
-                package,
-            }
-        }
-
-        fn npm(&self, latest: z::Result<&'static str>, outcome: InstallOutcome) -> FakeNpm<'_> {
-            FakeNpm {
-                work_dir: self.work_dir.path(),
                 latest,
                 outcome,
-                checks: 0,
-                versions_requested: Vec::new(),
+            )
+        }
+
+        fn for_platform(
+            os: z::Os,
+            arch: z::Architecture,
+            latest: z::Result<&'static str>,
+            outcome: InstallOutcome,
+        ) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let sut = super::NativePackage::new(directory.path(), os, arch).unwrap();
+            Self {
+                sut,
+                registry: Registry {
+                    work_dir: directory.path().to_owned(),
+                    latest,
+                    outcome,
+                    installs: Vec::new(),
+                },
+                statuses: Vec::new(),
+                directory,
             }
         }
 
-        fn start(&self, npm: &mut FakeNpm<'_>) -> z::Result<std::path::PathBuf> {
-            self.package
-                .ensure_executable(npm, |_| {})
+        fn with_cached_package(self, name: &str, executable: &str, version: &str) -> Self {
+            write_manifest(self.directory.path(), name, version);
+            write_binary(self.directory.path(), name, executable);
+            self
         }
 
-        fn assert_start_fails(&self, npm: &mut FakeNpm<'_>) {
-            let mut last_status = None;
-            let result = self
-                .package
-                .ensure_executable(npm, |status| {
-                    last_status = Some(status);
-                });
-            assert!(result.is_err());
+        fn with_cached_version(self, version: &str) -> Self {
+            self.with_cached_package(PACKAGE_NAME, EXECUTABLE, version)
+        }
+
+        fn start(&mut self) -> z::Result<std::path::PathBuf> {
+            self.sut
+                .ensure_executable(&mut self.registry, |status| {
+                    self.statuses.push(status);
+                })
+        }
+
+        fn assert_install_request(&self, version: &str) {
+            assert_eq!(
+                self.registry.installs,
+                [(
+                    PACKAGE_NAME.to_owned(),
+                    version.to_owned()
+                )],
+            );
+        }
+
+        fn assert_no_install_requested(&self) {
+            assert_eq!(
+                self.registry.installs,
+                Vec::<(String, String)>::new()
+            );
+        }
+
+        fn assert_ready(&self, result: z::Result<std::path::PathBuf>) {
+            assert_eq!(
+                result.unwrap(),
+                binary_path(
+                    self.directory.path(),
+                    PACKAGE_NAME,
+                    EXECUTABLE
+                ),
+            );
             assert!(matches!(
-                last_status,
-                Some(z::LanguageServerInstallationStatus::Failed(_))
+                self.statuses.last(),
+                Some(Status::None)
             ));
         }
+
+        fn assert_start_failure(&self, result: z::Result<std::path::PathBuf>, reason: &str) {
+            let error = result.unwrap_err();
+            assert!(error.contains(reason), "{error}");
+            assert!(
+                matches!(self.statuses.last(), Some(Status::Failed(message)) if message == &error)
+            );
+        }
     }
 
-    fn binary_path(work_dir: &std::path::Path) -> std::path::PathBuf {
-        work_dir
-            .join("node_modules")
-            .join(PACKAGE_NAME)
+    fn package_directory(work_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        work_dir.join("node_modules").join(name)
+    }
+
+    fn binary_path(work_dir: &std::path::Path, name: &str, executable: &str) -> std::path::PathBuf {
+        package_directory(work_dir, name)
             .join("lib")
-            .join("tsc.exe")
+            .join(executable)
     }
 
-    fn write_install(work_dir: &std::path::Path, version: &str, has_binary: bool) {
-        let directory = work_dir
-            .join("node_modules")
-            .join(PACKAGE_NAME);
-        std::fs::create_dir_all(directory.join("lib")).unwrap();
-        let manifest = z::serde_json::json!({"name": PACKAGE_NAME, "version": version});
+    fn write_manifest(work_dir: &std::path::Path, name: &str, version: &str) {
+        let directory = package_directory(work_dir, name);
+        std::fs::create_dir_all(&directory).unwrap();
+        let manifest = z::serde_json::json!({"name": name, "version": version});
         std::fs::write(
             directory.join("package.json"),
             manifest.to_string(),
         )
         .unwrap();
-        if has_binary {
-            std::fs::write(
-                binary_path(work_dir),
-                b"native executable",
-            )
-            .unwrap();
-        }
+    }
+
+    fn write_binary(work_dir: &std::path::Path, name: &str, executable: &str) {
+        let binary = binary_path(work_dir, name, executable);
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(binary, b"native executable").unwrap();
     }
 
     #[test]
-    fn cold_start_installs_the_exact_version() {
-        let fixture = Fixture::new();
-        let mut npm = fixture.npm(Ok("7.0.2"), InstallOutcome::Complete);
-        assert_eq!(
-            fixture.start(&mut npm).unwrap(),
-            binary_path(fixture.work_dir.path())
-        );
-        assert_eq!(npm.versions_requested, ["7.0.2"]);
+    fn first_start_installs_the_published_version_and_returns_its_executable() {
+        let mut fixture = StartFixture::new(Ok("7.0.2"), InstallOutcome::Complete);
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_install_request("7.0.2");
+        assert!(matches!(
+            fixture.statuses.as_slice(),
+            [
+                Status::CheckingForUpdate,
+                Status::Downloading,
+                Status::None
+            ]
+        ));
     }
 
     #[test]
-    fn cold_start_rejects_an_unsupported_release_without_downloading_it() {
-        let fixture = Fixture::new();
-        let mut npm = fixture.npm(
+    fn first_start_rejects_a_prerelease() {
+        let mut fixture = StartFixture::new(
             Ok("7.0.0-rc.1"),
             InstallOutcome::Complete,
         );
 
-        fixture.assert_start_fails(&mut npm);
+        let result = fixture.start();
 
-        assert_eq!(
-            npm.versions_requested,
-            Vec::<String>::new()
-        );
+        fixture.assert_start_failure(result, "unsupported");
+        fixture.assert_no_install_requested();
     }
 
     #[test]
-    fn each_start_checks_npm_and_reuses_the_current_version() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        let mut npm = fixture.npm(Ok("7.0.2"), InstallOutcome::Fail);
-        fixture.start(&mut npm).unwrap();
-        fixture.start(&mut npm).unwrap();
-        assert_eq!(npm.checks, 2);
-        assert_eq!(
-            npm.versions_requested,
-            Vec::<String>::new()
-        );
+    fn first_start_rejects_typescript_older_than_7() {
+        let mut fixture = StartFixture::new(Ok("6.9.0"), InstallOutcome::Complete);
+
+        let result = fixture.start();
+
+        fixture.assert_start_failure(result, "unsupported");
+        fixture.assert_no_install_requested();
     }
 
     #[test]
-    fn older_versions_and_build_metadata_changes_do_not_replace_a_cached_install() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        for available in ["7.0.1", "7.0.2+build"] {
-            let mut npm = fixture.npm(Ok(available), InstallOutcome::Fail);
-            fixture.start(&mut npm).unwrap();
-            assert_eq!(
-                npm.versions_requested,
-                Vec::<String>::new()
-            );
-        }
+    fn an_up_to_date_install_can_start_without_a_download() {
+        let mut fixture =
+            StartFixture::new(Ok("7.0.2"), InstallOutcome::Fail).with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_no_install_requested();
     }
 
     #[test]
-    fn a_failed_version_lookup_reuses_the_installed_binary() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        let mut npm = fixture.npm(
+    fn an_older_registry_release_leaves_the_current_install_available() {
+        let mut fixture =
+            StartFixture::new(Ok("7.0.1"), InstallOutcome::Fail).with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_no_install_requested();
+    }
+
+    #[test]
+    fn a_build_metadata_change_does_not_trigger_a_download() {
+        let mut fixture =
+            StartFixture::new(Ok("7.0.2+build"), InstallOutcome::Fail).with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_no_install_requested();
+    }
+
+    #[test]
+    fn a_cached_install_can_start_when_the_registry_is_offline() {
+        let mut fixture = StartFixture::new(
             Err("offline".into()),
             InstallOutcome::Fail,
-        );
-        fixture.start(&mut npm).unwrap();
-        assert_eq!(npm.checks, 1);
-        assert_eq!(
-            npm.versions_requested,
-            Vec::<String>::new()
-        );
+        )
+        .with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_no_install_requested();
     }
 
     #[test]
-    fn a_failed_version_lookup_does_not_reuse_an_unsupported_cached_binary() {
-        let fixture = Fixture::new();
-        write_install(
-            fixture.work_dir.path(),
-            "7.0.0-rc.1",
-            true,
-        );
-        let mut npm = fixture.npm(
+    fn a_cached_prerelease_cannot_start_when_the_registry_is_offline() {
+        let mut fixture = StartFixture::new(
             Err("offline".into()),
             InstallOutcome::Fail,
-        );
+        )
+        .with_cached_version("7.0.0-rc.1");
 
-        fixture.assert_start_fails(&mut npm);
+        let result = fixture.start();
+
+        fixture.assert_start_failure(result, "offline");
+        fixture.assert_no_install_requested();
     }
 
     #[test]
-    fn npm_success_requires_an_executable() {
-        let fixture = Fixture::new();
-        let mut npm = fixture.npm(
+    fn a_download_without_an_executable_cannot_start() {
+        let mut fixture = StartFixture::new(
             Ok("7.0.2"),
             InstallOutcome::MissingBinary,
         );
-        fixture.assert_start_fails(&mut npm);
-        assert!(
-            fixture
-                .package
-                .installed_version()
-                .is_none()
-        );
+
+        let result = fixture.start();
+
+        fixture.assert_start_failure(result, "missing or incomplete");
     }
 
     #[test]
-    fn a_successful_update_installs_the_new_version() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        let mut npm = fixture.npm(Ok("7.0.3"), InstallOutcome::Complete);
-        fixture.start(&mut npm).unwrap();
-        assert_eq!(
-            fixture.package.installed_version(),
-            Some(semver::Version::parse("7.0.3").unwrap())
-        );
+    fn a_cached_install_can_upgrade_to_a_newer_stable_major_release() {
+        let mut fixture =
+            StartFixture::new(Ok("8.0.0"), InstallOutcome::Complete).with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_install_request("8.0.0");
     }
 
     #[test]
-    fn npm_success_requires_the_expected_version() {
-        let fixture = Fixture::new();
-        let mut npm = fixture.npm(
+    fn a_download_of_the_wrong_version_cannot_start() {
+        let mut fixture = StartFixture::new(
             Ok("7.0.2"),
             InstallOutcome::WrongVersion,
         );
-        fixture.assert_start_fails(&mut npm);
-        assert_eq!(
-            fixture.package.installed_version(),
-            Some(semver::Version::parse("7.0.1").unwrap())
-        );
+
+        let result = fixture.start();
+
+        fixture.assert_start_failure(result, "missing or incomplete");
     }
 
     #[test]
-    fn a_failed_update_reuses_the_previous_install_if_it_is_intact() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        let mut npm = fixture.npm(Ok("7.0.3"), InstallOutcome::Fail);
-        fixture.start(&mut npm).unwrap();
-        assert_eq!(npm.versions_requested, ["7.0.3"]);
-        assert_eq!(
-            fixture
-                .package
-                .installed_version()
-                .unwrap()
-                .to_string(),
-            "7.0.2"
-        );
+    fn an_intact_cached_install_can_start_after_a_failed_update() {
+        let mut fixture =
+            StartFixture::new(Ok("7.0.3"), InstallOutcome::Fail).with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_ready(result);
+        fixture.assert_install_request("7.0.3");
     }
 
     #[test]
-    fn a_failed_update_reports_an_error_if_the_old_binary_is_missing() {
-        let fixture = Fixture::new();
-        write_install(fixture.work_dir.path(), "7.0.2", true);
-        let mut npm = fixture.npm(
+    fn a_failed_update_that_removes_the_old_binary_prevents_startup() {
+        let mut fixture = StartFixture::new(
             Ok("7.0.3"),
             InstallOutcome::FailAfterRemovingBinary,
-        );
-        fixture.assert_start_fails(&mut npm);
-        assert!(
-            fixture
-                .package
-                .installed_version()
-                .is_none()
-        );
+        )
+        .with_cached_version("7.0.2");
+
+        let result = fixture.start();
+
+        fixture.assert_start_failure(result, "npm failed");
     }
 
-    #[test]
-    fn maps_each_supported_platform_to_its_native_package() {
-        let work_dir = std::path::Path::new("");
-        for (os, platform, executable) in [
-            (z::Os::Linux, "linux", "tsc"),
-            (z::Os::Mac, "darwin", "tsc"),
-            (z::Os::Windows, "win32", "tsc.exe"),
-        ] {
-            for (arch, suffix) in [
-                (z::Architecture::Aarch64, "arm64"),
-                (z::Architecture::X8664, "x64"),
-            ] {
-                let package = super::NativePackage::new(work_dir, os, arch).unwrap();
-                let name = format!("@typescript/typescript-{platform}-{suffix}");
-                assert_eq!(package.name, name);
-                let directory = std::path::Path::new("node_modules").join(name);
+    macro_rules! cached_platform_starts {
+        ($test:ident, $os:ident, $arch:ident, $package:literal, $binary:literal) => {
+            #[test]
+            fn $test() {
+                let mut fixture = StartFixture::for_platform(
+                    z::Os::$os,
+                    z::Architecture::$arch,
+                    Err("offline".into()),
+                    InstallOutcome::Fail,
+                )
+                .with_cached_package($package, $binary, "7.0.2");
+
+                let result = fixture.start();
+
                 assert_eq!(
-                    package.manifest,
-                    directory.join("package.json")
-                );
-                assert_eq!(
-                    package.binary,
-                    directory.join("lib").join(executable)
+                    result.unwrap(),
+                    binary_path(
+                        fixture.directory.path(),
+                        $package,
+                        $binary
+                    ),
                 );
             }
-        }
+        };
     }
 
+    cached_platform_starts!(
+        linux_arm64_starts_its_native_binary,
+        Linux,
+        Aarch64,
+        "@typescript/typescript-linux-arm64",
+        "tsc"
+    );
+    cached_platform_starts!(
+        linux_x64_starts_its_native_binary,
+        Linux,
+        X8664,
+        "@typescript/typescript-linux-x64",
+        "tsc"
+    );
+    cached_platform_starts!(
+        mac_arm64_starts_its_native_binary,
+        Mac,
+        Aarch64,
+        "@typescript/typescript-darwin-arm64",
+        "tsc"
+    );
+    cached_platform_starts!(
+        mac_x64_starts_its_native_binary,
+        Mac,
+        X8664,
+        "@typescript/typescript-darwin-x64",
+        "tsc"
+    );
+    cached_platform_starts!(
+        windows_arm64_starts_its_native_binary,
+        Windows,
+        Aarch64,
+        "@typescript/typescript-win32-arm64",
+        "tsc.exe"
+    );
+
     #[test]
-    fn rejects_32_bit_x86() {
+    fn a_32_bit_platform_cannot_start_typescript_7() {
         let result = super::NativePackage::new(
             std::path::Path::new(""),
             z::Os::Windows,
             z::Architecture::X86,
         );
-        assert!(result.is_err());
-    }
 
-    #[test]
-    fn accepts_stable_typescript_7_or_newer() {
-        for (version, supported) in [
-            ("6.9.0", false),
-            ("7.0.0-rc.1", false),
-            ("7.0.0", true),
-            ("8.0.0", true),
-        ] {
-            let version = semver::Version::parse(version).unwrap();
-            assert_eq!(
-                super::is_supported(&version),
-                supported,
-                "{version}"
-            );
-        }
+        assert_eq!(
+            result.err().as_deref(),
+            Some("TypeScript 7 requires a 64-bit platform"),
+        );
     }
 }
