@@ -1,43 +1,184 @@
-use zed_extension_api::lsp::{Completion, CompletionKind, Symbol, SymbolKind};
-use zed_extension_api::{CodeLabel, CodeLabelSpan};
+use zed_extension_api as z;
 
-pub(crate) fn completion(completion: Completion) -> Option<CodeLabel> {
-    use CompletionKind::*;
+pub fn completion(completion: z::lsp::Completion) -> Option<z::CodeLabel> {
+    // Want to use full path like c++ but damn its too long lmao.
+    use z::lsp::CompletionKind as Kind;
+
     let highlight = match completion.kind? {
-        Class | Constructor | Enum | Interface | Struct | TypeParameter => "type",
-        Method | Function => "function",
-        Property | Field => "property",
-        Constant | EnumMember => "constant",
-        Variable => "variable",
-        Keyword => "keyword",
+        Kind::Class | Kind::Enum | Kind::Interface | Kind::Struct | Kind::TypeParameter => "type",
+        Kind::Constructor => "constructor",
+        Kind::Function => "function",
+        Kind::Method => "function.method",
+        Kind::Field | Kind::Property => "property",
+        Kind::Constant | Kind::EnumMember => "constant",
+        Kind::Variable => "variable",
+        Kind::Keyword => "keyword",
+        Kind::Operator => "operator",
         _ => return None,
     };
-    let mut label = highlighted_label(completion.label, highlight);
-    if let Some(detail) = completion.label_details.and_then(|details| details.detail) {
-        label.spans.push(CodeLabelSpan::literal(detail, None));
-    }
-    // Zed renders the description (including the source of auto-imports) separately.
-    Some(label)
+
+    let label_details = completion.label_details.as_ref();
+    let inline_detail = label_details
+        .and_then(|details| details.detail.as_deref())
+        .unwrap_or_default();
+    let description = label_details.and_then(|details| details.description.as_deref());
+    Some(completion_label(
+        completion.label,
+        highlight,
+        inline_detail,
+        completion.detail.as_deref(),
+        description,
+    ))
 }
 
-pub(crate) fn symbol(symbol: Symbol) -> Option<CodeLabel> {
-    use SymbolKind::*;
+pub fn symbol(symbol: z::lsp::Symbol) -> Option<z::CodeLabel> {
+    use z::lsp::SymbolKind as Kind;
+
     let highlight = match symbol.kind {
-        Class | Constructor | Enum | Interface | Struct | TypeParameter => "type",
-        Method | Function => "function",
-        Property | Field => "property",
-        Constant | EnumMember => "constant",
-        Variable => "variable",
+        Kind::Class | Kind::Enum | Kind::Interface | Kind::Struct | Kind::TypeParameter => "type",
+        Kind::Constructor => "constructor",
+        Kind::Function => "function",
+        Kind::Method => "function.method",
+        Kind::Field | Kind::Property => "property",
+        Kind::Constant | Kind::EnumMember => "constant",
+        Kind::Variable => "variable",
+        Kind::Operator => "operator",
         _ => return None,
     };
-    Some(highlighted_label(symbol.name, highlight))
+    Some(highlighted_label(
+        symbol.name,
+        highlight,
+    ))
 }
 
-fn highlighted_label(text: String, highlight: &str) -> CodeLabel {
-    let len = text.len();
-    CodeLabel {
+fn completion_label(
+    name: String,
+    highlight: &str,
+    inline_detail: &str,
+    detail: Option<&str>,
+    description: Option<&str>,
+) -> z::CodeLabel {
+    let secondary = [detail, description]
+        .into_iter()
+        .flatten()
+        .find(|text| !text.is_empty() && *text != name && *text != inline_detail);
+
+    let mut label = highlighted_label(name, highlight);
+    if !inline_detail.is_empty() {
+        label
+            .spans
+            .push(z::CodeLabelSpan::literal(
+                inline_detail,
+                None,
+            ));
+    }
+    if let Some(text) = secondary {
+        label
+            .spans
+            .push(z::CodeLabelSpan::literal(
+                format!(" {text}"),
+                None,
+            ));
+    }
+    label
+}
+
+fn highlighted_label(name: String, highlight: &str) -> z::CodeLabel {
+    let length = name.len();
+    z::CodeLabel {
         code: String::new(),
-        spans: vec![CodeLabelSpan::literal(text, Some(highlight.to_owned()))],
-        filter_range: (0..len).into(),
+        spans: vec![z::CodeLabelSpan::literal(
+            name,
+            Some(highlight.into()),
+        )],
+        filter_range: (0..length).into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zed_extension_api as z;
+
+    #[test]
+    fn completion_keeps_the_signature_and_import_source_outside_the_filter_range() {
+        let label = super::completion_label(
+            "café".into(),
+            "function",
+            "(size: number)",
+            Some("café"),
+            Some("./menu"),
+        );
+
+        assert_label(
+            &label,
+            "café(size: number) ./menu",
+            "café",
+            "function",
+        );
+    }
+
+    #[test]
+    fn completion_uses_resolved_detail_when_available() {
+        let label = super::completion(z::lsp::Completion {
+            label: "size".into(),
+            label_details: None,
+            detail: Some("number".into()),
+            kind: Some(z::lsp::CompletionKind::Property),
+            insert_text_format: None,
+        })
+        .unwrap();
+
+        assert_label(
+            &label,
+            "size number",
+            "size",
+            "property",
+        );
+    }
+
+    #[test]
+    fn workspace_symbol_highlights_the_interface_name() {
+        let label = super::symbol(z::lsp::Symbol {
+            name: "Menu".into(),
+            kind: z::lsp::SymbolKind::Interface,
+        })
+        .unwrap();
+
+        assert_label(&label, "Menu", "Menu", "type");
+    }
+
+    #[test]
+    fn workspace_file_symbol_leaves_the_label_to_zed() {
+        assert!(
+            super::symbol(z::lsp::Symbol {
+                name: "menu.ts".into(),
+                kind: z::lsp::SymbolKind::File,
+            })
+            .is_none()
+        );
+    }
+
+    fn assert_label(label: &z::CodeLabel, expected_text: &str, name: &str, highlight: &str) {
+        let mut text = String::new();
+        let mut highlighted_name = String::new();
+        for span in &label.spans {
+            match span {
+                z::CodeLabelSpan::Literal(span) => {
+                    text.push_str(&span.text);
+                    if let Some(highlight_name) = &span.highlight_name {
+                        assert_eq!(highlight_name, highlight);
+                        highlighted_name.push_str(&span.text);
+                    }
+                }
+                z::CodeLabelSpan::CodeRange(range) => {
+                    text.push_str(&label.code[range.start as usize..range.end as usize]);
+                }
+            }
+        }
+
+        let filter = label.filter_range.start as usize..label.filter_range.end as usize;
+        assert_eq!(text, expected_text);
+        assert_eq!(text.get(filter), Some(name));
+        assert_eq!(highlighted_name, name);
     }
 }
