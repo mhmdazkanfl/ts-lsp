@@ -4,12 +4,18 @@ use zed_extension_api as z;
 
 pub(super) fn completion(completion: z::lsp::Completion) -> Option<z::CodeLabel> {
     let highlight = self::highlight::for_completion(completion.kind?)?;
-
-    let label_details = completion.label_details.as_ref();
-    let inline_detail = label_details
-        .and_then(|details| details.detail.as_deref())
-        .unwrap_or_default();
-    let description = label_details.and_then(|details| details.description.as_deref());
+    let (inline_detail, description) = completion
+        .label_details
+        .as_ref()
+        .map_or_default(|details| {
+            (
+                details
+                    .detail
+                    .as_deref()
+                    .unwrap_or_default(),
+                details.description.as_deref(),
+            )
+        });
 
     Some(completion_label(
         completion.label,

@@ -106,6 +106,7 @@ rustup target add wasm32-wasip2
 cargo fmt --all -- --check
 cargo test --locked
 node --test tests/highlight_proxy.test.cjs
+cargo clippy --locked --all-targets -- -D warnings
 cargo clippy --locked --target wasm32-wasip2 -- -D warnings
 cargo build --locked --release --target wasm32-wasip2
 ```

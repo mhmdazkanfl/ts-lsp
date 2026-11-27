@@ -8,18 +8,16 @@ pub(super) fn command(
 ) -> z::Result<z::Command> {
     let executable = crate::typescript::executable(language_server_id)?;
     let settings = z::settings::LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
-    let (args, env) = settings
+    let (arguments, environment) = settings
         .binary
-        .map_or((None, None), |binary| {
-            (binary.arguments, binary.env)
-        });
+        .map_or_default(|binary| (binary.arguments, binary.env));
 
     let command = z::Command {
         command: executable
             .to_string_lossy()
             .into_owned(),
-        args: args.unwrap_or_else(|| vec!["--lsp".into(), "--stdio".into()]),
-        env: env
+        args: arguments.unwrap_or_else(|| vec!["--lsp".into(), "--stdio".into()]),
+        env: environment
             .unwrap_or_default()
             .into_iter()
             .collect(),

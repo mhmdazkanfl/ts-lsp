@@ -39,7 +39,7 @@ impl NativePackage {
     }
 
     fn ensure_executable(
-        &self,
+        self,
         npm: &mut impl Npm,
         mut report: impl FnMut(z::LanguageServerInstallationStatus),
     ) -> z::Result<std::path::PathBuf> {
@@ -50,35 +50,40 @@ impl NativePackage {
         let update = self
             .latest_supported_version(npm)
             .and_then(|available| {
-                let needs_update = cached.as_ref().is_none_or(|installed| {
-                    installed
-                        .cmp_precedence(&available)
-                        .is_lt()
-                });
-                if needs_update {
-                    report(z::LanguageServerInstallationStatus::Downloading);
-                    self.install(npm, &available)
-                } else {
-                    Ok(())
+                if cached
+                    .as_ref()
+                    .is_some_and(|installed| {
+                        installed
+                            .cmp_precedence(&available)
+                            .is_ge()
+                    })
+                {
+                    return Ok(());
                 }
+                report(z::LanguageServerInstallationStatus::Downloading);
+                self.install(npm, &available)
             });
 
-        if let Err(error) = update {
-            if cached.is_none() || self.installed_version() != cached {
+        match update {
+            Ok(()) => {}
+            Err(error) if cached.is_some() && self.installed_version() == cached => {
+                eprintln!(
+                    "Using the installed TypeScript language server after an update failed: {error}"
+                );
+            }
+            Err(error) => {
                 report(z::LanguageServerInstallationStatus::Failed(error.clone()));
                 return Err(error);
             }
-            eprintln!(
-                "Using the installed TypeScript language server after an update failed: {error}"
-            );
         }
 
         report(z::LanguageServerInstallationStatus::None);
-        Ok(self.binary.clone())
+        Ok(self.binary)
     }
 
     fn installed_version(&self) -> Option<semver::Version> {
-        if !std::fs::metadata(&self.binary).is_ok_and(|file| file.is_file() && file.len() > 0) {
+        let binary = std::fs::metadata(&self.binary).ok()?;
+        if !binary.is_file() || binary.len() == 0 {
             return None;
         }
 
@@ -87,45 +92,36 @@ impl NativePackage {
         if package.get("name")?.as_str()? != self.name {
             return None;
         }
-        semver::Version::parse(package.get("version")?.as_str()?).ok()
+        package
+            .get("version")?
+            .as_str()?
+            .parse()
+            .ok()
     }
 
     fn latest_supported_version(&self, npm: &mut impl Npm) -> z::Result<semver::Version> {
+        let name = &self.name;
         let latest = npm
-            .latest_version(&self.name)
-            .map_err(|error| {
-                format!(
-                    "Failed to check the latest version of {}: {error}",
-                    self.name
-                )
-            })?;
-        let version = semver::Version::parse(&latest).map_err(|error| {
-            format!(
-                "Invalid version {latest} for {}: {error}",
-                self.name
-            )
-        })?;
+            .latest_version(name)
+            .map_err(|error| format!("Failed to check the latest version of {name}: {error}"))?;
+        let version = latest
+            .parse()
+            .map_err(|error| format!("Invalid version {latest} for {name}: {error}"))?;
         if !is_supported(&version) {
             return Err(format!(
-                "{}@{version} is unsupported. Expected a stable TypeScript version {MINIMUM_MAJOR_VERSION} or newer",
-                self.name
+                "{name}@{version} is unsupported. Expected a stable TypeScript version {MINIMUM_MAJOR_VERSION} or newer"
             ));
         }
         Ok(version)
     }
 
     fn install(&self, npm: &mut impl Npm, version: &semver::Version) -> z::Result<()> {
-        npm.install(&self.name, &version.to_string())
-            .map_err(|error| {
-                format!(
-                    "Failed to install {}@{version}: {error}",
-                    self.name
-                )
-            })?;
+        let name = &self.name;
+        npm.install(name, &version.to_string())
+            .map_err(|error| format!("Failed to install {name}@{version}: {error}"))?;
         if self.installed_version().as_ref() != Some(version) {
             return Err(format!(
-                "npm reported success for {}@{version}, but the expected install at {} is missing or incomplete",
-                self.name,
+                "npm reported success for {name}@{version}, but the expected install at {} is missing or incomplete",
                 self.binary.display()
             ));
         }
@@ -162,7 +158,6 @@ fn is_supported(version: &semver::Version) -> bool {
 #[cfg(test)]
 mod tests {
     use zed_extension_api as z;
-    use zed_extension_api::LanguageServerInstallationStatus as Status;
 
     const PACKAGE_NAME: &str = "@typescript/typescript-win32-x64";
     const EXECUTABLE: &str = "tsc.exe";
@@ -216,9 +211,9 @@ mod tests {
     }
 
     struct StartFixture {
-        sut: super::NativePackage,
+        platform: (z::Os, z::Architecture),
         registry: Registry,
-        statuses: Vec<Status>,
+        statuses: Vec<z::LanguageServerInstallationStatus>,
         directory: tempfile::TempDir,
     }
 
@@ -239,9 +234,8 @@ mod tests {
             outcome: InstallOutcome,
         ) -> Self {
             let directory = tempfile::tempdir().unwrap();
-            let sut = super::NativePackage::new(directory.path(), os, arch).unwrap();
             Self {
-                sut,
+                platform: (os, arch),
                 registry: Registry {
                     work_dir: directory.path().to_owned(),
                     latest,
@@ -264,10 +258,11 @@ mod tests {
         }
 
         fn start(&mut self) -> z::Result<std::path::PathBuf> {
-            self.sut
-                .ensure_executable(&mut self.registry, |status| {
-                    self.statuses.push(status);
-                })
+            let (os, arch) = self.platform;
+            let package = super::NativePackage::new(self.directory.path(), os, arch)?;
+            package.ensure_executable(&mut self.registry, |status| {
+                self.statuses.push(status);
+            })
         }
 
         fn assert_install_request(&self, version: &str) {
@@ -298,7 +293,7 @@ mod tests {
             );
             assert!(matches!(
                 self.statuses.last(),
-                Some(Status::None)
+                Some(z::LanguageServerInstallationStatus::None)
             ));
         }
 
@@ -306,7 +301,7 @@ mod tests {
             let error = result.unwrap_err();
             assert!(error.contains(reason), "{error}");
             assert!(
-                matches!(self.statuses.last(), Some(Status::Failed(message)) if message == &error)
+                matches!(self.statuses.last(), Some(z::LanguageServerInstallationStatus::Failed(message)) if message == &error)
             );
         }
     }
@@ -349,9 +344,9 @@ mod tests {
         assert!(matches!(
             fixture.statuses.as_slice(),
             [
-                Status::CheckingForUpdate,
-                Status::Downloading,
-                Status::None
+                z::LanguageServerInstallationStatus::CheckingForUpdate,
+                z::LanguageServerInstallationStatus::Downloading,
+                z::LanguageServerInstallationStatus::None
             ]
         ));
     }

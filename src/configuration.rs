@@ -25,35 +25,29 @@ fn with_editor_defaults(
     settings: Option<z::serde_json::Value>,
     tab_size: Option<u32>,
 ) -> z::serde_json::Value {
-    let mut settings = settings.unwrap_or_else(|| z::serde_json::json!({}));
-    let Some(editor) = settings
-        .as_object_mut()
-        .and_then(|sections| {
-            sections
-                .entry("editor")
-                .or_insert_with(|| z::serde_json::json!({}))
-                .as_object_mut()
-        })
+    let mut settings =
+        settings.unwrap_or_else(|| z::serde_json::Value::Object(z::serde_json::Map::new()));
+    let z::serde_json::Value::Object(sections) = &mut settings else {
+        return settings;
+    };
+    let z::serde_json::Value::Object(editor) = sections
+        .entry("editor")
+        .or_insert_with(|| z::serde_json::Value::Object(z::serde_json::Map::new()))
     else {
         return settings;
     };
 
-    for (key, value) in [
-        (
-            "includeInlayParameterNameHints",
-            "literals".into(),
-        ),
-        (
-            "includeInlayVariableTypeHints",
-            true.into(),
-        ),
-        ("referencesCodeLensEnabled", true.into()),
-        (
-            "implementationsCodeLensEnabled",
-            true.into(),
-        ),
+    editor
+        .entry("includeInlayParameterNameHints")
+        .or_insert_with(|| "literals".into());
+    for key in [
+        "includeInlayVariableTypeHints",
+        "referencesCodeLensEnabled",
+        "implementationsCodeLensEnabled",
     ] {
-        editor.entry(key).or_insert(value);
+        editor
+            .entry(key)
+            .or_insert(z::serde_json::Value::Bool(true));
     }
     if let Some(tab_size) = tab_size {
         for key in ["tabSize", "indentSize"] {
