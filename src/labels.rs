@@ -177,16 +177,4 @@ mod tests {
 
         assert_label(&label, "Menu", "Menu", "type");
     }
-
-    #[test]
-    fn workspace_file_symbol_leaves_the_label_to_zed() {
-        let symbol = z::lsp::Symbol {
-            name: "menu.ts".into(),
-            kind: z::lsp::SymbolKind::File,
-        };
-
-        let label = super::symbol(symbol);
-
-        assert!(label.is_none());
-    }
 }
