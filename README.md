@@ -101,7 +101,8 @@ TypeScript 7.0.2 provides `source.organizeImports`, `source.removeUnusedImports`
 rustup target add wasm32-wasip2
 cargo fmt --all -- --check
 cargo test --locked
-node --test tests/highlight_proxy.test.cjs
+node --test tests/highlight_proxy.test.cjs tests/highlight_proxy.integration.test.cjs
+cargo test --locked the_generated_launch_runs_the_embedded_proxy -- --ignored
 cargo clippy --locked --all-targets -- -D warnings
 cargo clippy --locked --target wasm32-wasip2 -- -D warnings
 cargo build --locked --release --target wasm32-wasip2

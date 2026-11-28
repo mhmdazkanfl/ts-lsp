@@ -6,7 +6,7 @@ const { pipeline } = require("node:stream/promises");
 const headerTerminator = "\r\n\r\n";
 
 // Keep the original URI if decoding would change path boundaries or fail to preserve the path.
-function normalizeFileUri(uri) {
+function normalizeFileUri(uri, platform) {
     const match = /^file:\/\/([^/?#]*)(\/[^?#]*)$/.exec(uri);
     if (!match) {
         return uri;
@@ -15,7 +15,7 @@ function normalizeFileUri(uri) {
     try {
         const segments = pathname.split("/").map(decodeURIComponent);
         if (segments.some((segment) => segment.includes("/") || segment.includes("\0")
-            || (process.platform === "win32" && segment.includes("\\")))) {
+            || (platform === "win32" && segment.includes("\\")))) {
             return uri;
         }
         if (authority === "") {
@@ -39,12 +39,12 @@ function normalizeFileUri(uri) {
     }
 }
 
-function normalizeHighlightRequest(message) {
+function normalizeHighlightRequest(message, platform) {
     const uri = message?.params?.textDocument?.uri;
     if (message?.method !== "textDocument/documentHighlight" || typeof uri !== "string") {
         return;
     }
-    const normalized = normalizeFileUri(uri);
+    const normalized = normalizeFileUri(uri, platform);
     if (normalized !== uri) {
         return {
             ...message,
@@ -77,11 +77,12 @@ async function* readFrames(input) {
                     header = data;
                     break;
                 }
-                const field = /^Content-Length:[ \t]*(\d+)[ \t]*\r?$/im.exec(
-                    data.toString("ascii", 0, end),
-                );
-                remaining = Number(field?.[1]);
-                if (!Number.isSafeInteger(remaining) || remaining <= 0) {
+                const [field, duplicate] = data
+                    .toString("ascii", 0, end)
+                    .matchAll(/^Content-Length:([^\r\n]*)\r?$/gim);
+                const length = /^[ \t]*(\d+)[ \t]*$/.exec(field?.[1] ?? "");
+                remaining = Number(length?.[1]);
+                if (duplicate || !Number.isSafeInteger(remaining) || remaining <= 0) {
                     throw new Error("Invalid LSP Content-Length");
                 }
                 offset += end + headerTerminator.length - header.length;
@@ -108,10 +109,10 @@ async function* readFrames(input) {
     }
 }
 
-async function* rewriteRequests(input) {
+async function* rewriteRequests(input, platform = process.platform) {
     for await (const { header, body } of readFrames(input)) {
         const message = JSON.parse(body.toString("utf8"));
-        const replacement = normalizeHighlightRequest(message);
+        const replacement = normalizeHighlightRequest(message, platform);
         yield replacement === undefined ? Buffer.concat([header, body]) : encodeFrame(replacement);
     }
 }
@@ -147,8 +148,8 @@ function run() {
     });
     pipeline(process.stdin, rewriteRequests, server.stdin).catch(
         (error) => {
-            // The child can close its input as part of a normal shutdown.
-            if (!exited) {
+            // A child can close stdin before it finishes writing or reports its exit status.
+            if (!exited && error.code !== "EPIPE") {
                 fail(error);
             }
         },

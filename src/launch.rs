@@ -22,5 +22,8 @@ pub(super) fn command(
             .into_iter()
             .collect(),
     };
-    Ok(self::highlight_proxy::wrap(command))
+    Ok(highlight_proxy::wrap(
+        command,
+        highlight_proxy::Runtime::resolve,
+    ))
 }
