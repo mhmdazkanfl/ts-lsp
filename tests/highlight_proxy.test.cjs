@@ -3,12 +3,11 @@
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const { once } = require("node:events");
-const path = require("node:path");
+const { readFileSync } = require("node:fs");
 const { buffer } = require("node:stream/consumers");
 const { test } = require("node:test");
 const { rewriteRequests } = require("../src/launch/highlight_proxy.cjs");
 
-const proxy = path.join(__dirname, "../src/launch/highlight_proxy.cjs");
 const contentType = "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n";
 const uri = "file:///Work/Démo/(test)/%6Dain.ts";
 const normalizedUri = "file:///Work/D%C3%A9mo/%28test%29/main.ts";
@@ -110,7 +109,8 @@ test("a truncated request fails when the input closes", async () => {
     await assert.rejects(output, /Incomplete LSP message/);
 });
 
-test("the stdio proxy sends a normalized request and delivers the server response verbatim", { timeout: 5000 }, async (t) => {
+test("the inline stdio proxy sends a normalized request and delivers the server response verbatim", { timeout: 5000 }, async (t) => {
+    const proxy = readFileSync(require.resolve("../src/launch/highlight_proxy.cjs"), "utf8") + "\nrun();";
     const response = frame({ jsonrpc: "2.0", id: requestId, result: [] }, contentType);
     // Use the child's stderr to observe what reached its stdin.
     const server = `
@@ -118,7 +118,7 @@ test("the stdio proxy sends a normalized request and delivers the server respons
         process.stdin.on("end", () => process.stdout.write(process.argv[1]));
     `;
     const child = spawn(process.execPath, [
-        proxy, process.execPath, "-e", server, response.toString(),
+        "--input-type=commonjs", "--eval", proxy, "--", process.execPath, "-e", server, response.toString(),
     ], { stdio: ["pipe", "pipe", "pipe"] });
     t.after(() => child.kill());
     const result = Promise.all([buffer(child.stderr), buffer(child.stdout), once(child, "close")]);

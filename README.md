@@ -95,10 +95,6 @@ Add `code_actions_on_format` to a language to run source actions when you format
 
 TypeScript 7.0.2 provides `source.organizeImports`, `source.removeUnusedImports`, `source.sortImports`, and `source.fixAll`. TypeScript 7.1 Beta adds `.ts` to those four kinds, for example `source.organizeImports.ts`. [TypeScript 7.0.2 actions](https://github.com/microsoft/TypeScript/blob/v7.0.2/tsc/internal/lsp/server.go#L1152-L1160) · [TypeScript 7.1 Beta actions](https://github.com/microsoft/TypeScript/blob/v7.1-beta/tsc/internal/lsp/server.go#L364-L371)
 
-### Symbol highlights
-
-For extension-managed TypeScript 7 and later, a stdio proxy normalizes the file URI in standard symbol highlight requests to match TypeScript's spelling. It uses the official TypeScript executable and forwards the server's responses directly to Zed. [Issue #3](https://github.com/mhmdazkanfl/zed-tsgo-ls/issues/3)
-
 ## Development checks
 
 ```sh

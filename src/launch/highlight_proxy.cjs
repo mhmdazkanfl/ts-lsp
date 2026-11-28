@@ -116,7 +116,9 @@ async function* rewriteRequests(input) {
     }
 }
 
-function run(binary, args) {
+function run() {
+    // With --eval, the first argument after the Node executable is the server path.
+    const [binary, ...args] = process.argv.slice(1);
     const server = spawn(binary, args, {
         stdio: ["pipe", "pipe", "inherit"],
         windowsHide: true,
@@ -155,8 +157,3 @@ function run(binary, args) {
 }
 
 module.exports = { rewriteRequests };
-
-if (require.main === module) {
-    const [binary, ...args] = process.argv.slice(2);
-    run(binary, args);
-}
