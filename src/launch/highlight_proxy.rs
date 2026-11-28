@@ -23,12 +23,14 @@ fn attach_highlight_proxy(command: &mut z::Command) -> z::Result<()> {
     let node = z::node_binary_path()?;
     let directory = std::env::current_dir()
         .map_err(|error| format!("Failed to resolve the extension directory: {error}"))?;
-    let script = install_proxy(&directory).map_err(|error| {
+    // WASI treats Windows drive-letter paths as relative. Use Zed's `.` preopen for file I/O.
+    install_proxy(std::path::Path::new(".")).map_err(|error| {
         format!(
             "Failed to install {PROXY_NAME} in {}: {error}",
             directory.display()
         )
     })?;
+    let script = directory.join(PROXY_NAME);
     let executable = directory.join(&command.command);
 
     command.command = node;
@@ -44,19 +46,30 @@ fn attach_highlight_proxy(command: &mut z::Command) -> z::Result<()> {
     Ok(())
 }
 
-fn install_proxy(directory: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+fn install_proxy(directory: &std::path::Path) -> std::io::Result<()> {
     let destination = directory.join(PROXY_NAME);
     if std::fs::read(&destination).is_ok_and(|contents| contents == PROXY) {
-        return Ok(destination);
+        return Ok(());
     }
 
-    // Keep the temporary file and its destination under the same WASI preopen.
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-    std::io::Write::write_all(&mut temporary, PROXY)?;
-    temporary
-        .into_temp_path()
-        .persist(&destination)?;
-    Ok(destination)
+    let (path, mut temporary) = loop {
+        let path = directory.join(format!(
+            ".{PROXY_NAME}.{:016x}.tmp",
+            fastrand::u64(..)
+        ));
+        match std::fs::File::create_new(&path) {
+            Ok(file) => break (path, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    };
+    let written = std::io::Write::write_all(&mut temporary, PROXY);
+    drop(temporary);
+    if let Err(error) = written.and_then(|()| std::fs::rename(&path, &destination)) {
+        let _ = std::fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -67,10 +80,7 @@ mod tests {
         let script = directory.path().join(super::PROXY_NAME);
         std::fs::write(&script, b"stale script").unwrap();
 
-        assert_eq!(
-            super::install_proxy(directory.path()).unwrap(),
-            script
-        );
+        super::install_proxy(directory.path()).unwrap();
         assert_eq!(
             std::fs::read(script).unwrap(),
             super::PROXY
